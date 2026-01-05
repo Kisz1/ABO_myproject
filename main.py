@@ -660,6 +660,9 @@ threshold_ratio = st.sidebar.slider(
 
 analyze_button = st.sidebar.button("Analyze")
 
+st.sidebar.markdown("---")
+st.sidebar.caption("Version 2.0")
+
 
 def get_cds(exon_number):
     for exon in exons_ref:
