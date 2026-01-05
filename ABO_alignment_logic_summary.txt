@@ -1,0 +1,56 @@
+# Walkthrough - FASTA Alignment Helper
+
+I have implemented the helper functions to align FASTA chunks to the genomic reference.
+
+## Changes
+
+### `utils/FASTA_analyzer.py`
+
+Added methods for global alignment, exon matching, coverage stats, and **variant identification**.
+
+## Final Logic Summary
+
+Here is the finalized algorithm for identifying alleles from FASTA chunks:
+
+1.  **Exon Alignment (All-vs-All)**:
+    - The sequence is aligned against **all individual exons (1-7)**.
+    - **Orientation Check**: Both **Forward** and **Reverse Complement** are tested for every exon.
+    - The best matching exon/orientation is selected based on Alignment Score.
+
+2.  **Coverage & Similarity Calculation**:
+    - **Coverage %**: Percentage of the *exon sequence* that is covered by the read.
+    - **Similarity %**: Percentage of matching bases within the aligned region.
+
+3.  **Two-Step Confirmation Filter**:
+    - A match is only considered **"Confirmed"** if:
+        - **Coverage > 80%** (To ensure the read covers most of the exon).
+        - **Similarity > 90%** (To ensure it's a high-quality match, allowing for a few SNPs).
+    - Matches below these thresholds are treated as noise/unmapped.
+
+4.  **Variant Calling**:
+    - For confirmed matches, the sequence is re-aligned to the specific exon in the correct orientation.
+    - **SNPs**, **Insertions**, and **Deletions** are identified and mapped to genomic positions.
+
+5.  **Allele Identification**:
+    - The identified variants are looked up in the `ABO_enhanced_subgraph.gml`.
+    - Returns a list of **Possible Alleles** (e.g., `ABO*B.01`, `ABO*O.01.01`) that contain these variants.
+    - If no variants are found (Perfect Match), it defaults to the Reference Allele (e.g., A1.01).
+
+## Verification Results
+
+### Allele Identification Report
+
+**Results Table**:
+
+| Filename | Exon | Variants (ISBT Pos) | Possible Alleles |
+| :--- | :--- | :--- | :--- |
+| `i37.2.fasta` | E6 | **261delG** | **ABO*O.01.01**, ABO*O.01.02... (Classic O Allele) |
+| `i37.7.fasta` | E7 | 526C>G, 657C>T, 703G>A, 796C>A, 803G>C, 930G>A | **ABO*B.01**, ABO*A2.04... (B or A2 sub-groups) |
+| `i37.1.fasta` | E6 | 297A>G | ABO*A2.04, ABO*B.01, etc. |
+| `i37.3.fasta` | E5 | None (Ref) | **Reference** (Likely A1.01) |
+| `i37.4.fasta` | E5 | None (Ref) | **Reference** (Likely A1.01) |
+
+**Conclusion**: 
+- **`i37.2` is clearly an O Allele** because it contains the 261delG frameshift deletion.
+- **`i37.7`** strongly resembles a **B Allele** (or A2) due to the specific Exon 7 snp pattern.
+- **`i37.3` / `i37.4`** align with wild-type **Reference** (A1.01).

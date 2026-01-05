@@ -83,3 +83,39 @@ class ABOIdentifier:
             if exon['cds_start'] <= int(pos) <= exon['cds_end']: 
                 return exon['exon_number']
         return None
+
+    def get_all_alleles(self) -> set:
+        """Return a set of all allele names in the graph."""
+        if not self.graph:
+            return set()
+        return {node for node, data in self.graph.nodes(data=True) if data.get('type') == 'Allele'}
+
+    def get_alleles_with_variant_in_exon(self, exon_number: int) -> set:
+        """Return a set of alleles that have ANY variant in the specified exon."""
+        alleles_with_variants = set()
+        if not self.graph:
+            return alleles_with_variants
+
+        for node, data in self.graph.nodes(data=True):
+            if data.get('type') == 'Variant':
+                # Check which exon this variant belongs to
+                # We need to use genomic position? Or ISBT pos?
+                # The node data usually has 'position' (ISBT pos).
+                pos = data.get('position')
+                if pos:
+                    var_exon = self.get_exon(pos)
+                    if var_exon == exon_number:
+                        # Find alleles connected to this variant (Variant -> Allele)
+                        # In the graph, edges are Allele -> Variant (HasVariant)? Or Variant -> Allele?
+                        # get_variants_for_allele uses predecessors (Allele -> Variant).
+                        # So Variant -> successors -> Allele?
+                        # Let's check get_variants_for_allele:
+                        # for neighbor in self.graph.predecessors(allele_node): if ... Variant
+                        # So Edge is Variant -> Allele? 
+                        # "predecessors(allele_node)" means Arrow points TO Allele.
+                        # So Variant -> Allele.
+                        # So we check successors of Variant.
+                        for neighbor in self.graph.successors(node):
+                             if self.graph.nodes[neighbor].get('type') == 'Allele':
+                                 alleles_with_variants.add(neighbor)
+        return alleles_with_variants

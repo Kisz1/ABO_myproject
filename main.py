@@ -12,6 +12,9 @@ import utils.ab1_analyzer as ab1_utils
 import utils.abo_identifier as abo_utils
 
 import plotly.graph_objects as go
+import itertools
+
+st.set_page_config(layout="wide")
 
 IUPAC_CODES = {
     'A':	'A',
@@ -172,7 +175,7 @@ def plot_chromatogram_plotly(trace, base_width=2, hetero_sites=None,
     return fig
 
 
-def display_alignment_with_snps(aligned_query, aligned_reference, cds_start=None, cds_end=None, variants=None, exon_number=None):
+def display_alignment_with_snps(aligned_query, aligned_reference, cds_start=None, cds_end=None, variants=None, exon_number=None, unique_id=None):
     """
     Display aligned sequences in code boxes with copy functionality and red highlighting for variants.
     """
@@ -202,8 +205,10 @@ def display_alignment_with_snps(aligned_query, aligned_reference, cds_start=None
 
     # Also provide plain text version for easy copying
     ref_plain = f"REF: {aligned_reference}"
-    with st.expander("📋 Copy plain text reference"):
-        st.code(ref_plain, language=None)
+    with st.container():
+        key_suffix = f"{unique_id}_{exon_number}" if unique_id else f"{exon_number}_{str(aligned_reference)[:10]}"
+        if st.checkbox("Show plain text reference", key=f"align_ref_{key_suffix}"):
+            st.code(ref_plain, language=None)
 
     st.write("**Query Sequence:**")
     st.markdown(f'<div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; border: 1px solid #e9ecef; font-family: monospace; font-size: 14px; position: relative;">{query_html}</div>',
@@ -211,8 +216,10 @@ def display_alignment_with_snps(aligned_query, aligned_reference, cds_start=None
 
     # Also provide plain text version for easy copying
     query_plain = f"QRY: {aligned_query}"
-    with st.expander("📋 Copy plain text query"):
-        st.code(query_plain, language=None)
+    with st.container():
+        key_suffix = f"{unique_id}_{exon_number}" if unique_id else f"{exon_number}_{str(aligned_query)[:10]}"
+        if st.checkbox("Show plain text query", key=f"align_query_{key_suffix}"):
+            st.code(query_plain, language=None)
 
     # Analyze differences and show summary
     differences = []
@@ -538,8 +545,9 @@ def get_display_base(base):
     return base
 
 
-def identify_abo_alleles(FASTA_variant_list):
-    abo_identifier = abo_utils.ABOIdentifier("ABO")
+def identify_abo_alleles(FASTA_variant_list, abo_identifier=None):
+    if abo_identifier is None:
+        abo_identifier = abo_utils.ABOIdentifier("ABO")
     var_nodes = []
     het_variants = []
     unknown = []
@@ -662,7 +670,7 @@ def get_cds(exon_number):
 
 # --- Main Panel ---
 st.title("Genetic Analysis Dashboard")
-st.set_page_config(layout="wide")
+
 
 # Tabs for displaying results
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -847,34 +855,36 @@ if analyze_button:
     if not fwd_ab1 and not fasta_files:
         st.warning("Please upload at least one file before analyzing.")
     else:
-        st.success("Files uploaded successfully! Starting analysis...")
+        status_container = st.empty()
+        status_container.success("Files uploaded successfully! Starting analysis...")
 
+        # --- Robust Processing Logic ---
+        robust_summary = []
         if fasta_files:
-            exons_ref = []
-            processed_FASTA = {}
-            for ref_file in fasta_files:
-                fasta_detected, exons_ref = process_fasta_file(
-                    ref_file, exon_start, exon_end)
-
-                if fasta_detected:
-                    if processed_FASTA == {}:
-                        processed_FASTA = fasta_detected
-                    else:
-                        for i in fasta_detected['exon_combination']:
-                            if i not in processed_FASTA['exon_combination']:
-                                processed_FASTA['exon_combination'].append(i)
-                                processed_FASTA['query_length'] += fasta_detected['query_length']
-                                processed_FASTA['exon_alignments'].extend(
-                                    # type: ignore
-                                    fasta_detected['exon_alignments'])
+            service = fasta_utils.FASTAAlignmentService()
+            # Generate Robust Summary
+            robust_summary = service.generate_batch_summary(fasta_files)
 
         processed_AB1, hets = process_ab1_files(
             fwd_ab1, exons_ref, threshold_ratio) if fwd_ab1 else (None, None)
 
-        possible_alleles, unknown_alleles_to_display, variants_name, node_iupac_map = identify_abo_alleles(
-            processed_FASTA) if processed_FASTA else []
+        # Prepare for Allele Prediction (Tab 3)
+        # Filter only confirmed exons for allele prediction
+        confirmed_results = [r for r in robust_summary if "Confirmed" in r.get('decision', "")]
+        
+        # Wrap in expected structure for existing identify_abo_alleles function
+        # The function expects {'exon_alignments': [list of exon dicts with 'variants']}
+        # Our robust result dicts alrady have 'variants' and 'exon' (we might need to map 'exon' -> 'exon_number' if mismatched, but identify_abo_alleles seems to use 'variants' inner fields mostly)
+        # Checking identify_abo_alleles: it iterates `exon['variants']`. It doesn't use `exon['exon_number']` itself much, mostly looks at ISBT pos in variants.
+        # But wait, identify_abo_alleles loops: `for exon in FASTA_variant_list['exon_alignments']`.
+        # So we just pass `{'exon_alignments': confirmed_results}`.
+        # Per-file identification will be done in Tab 3
+        # possible_alleles, unknown_alleles_to_display, variants_name, node_iupac_map = identify_abo_alleles(
+        #    {'exon_alignments': confirmed_results}) if confirmed_results else ([], [], [], {})
 
-        tested_exons = [exon['exon'] for exon in exons_ref]
+        # tested_exons = [r['exon_number'] for r in confirmed_results]
+        
+        status_container.empty()
 
         with tab1:
             st.subheader("Chromatogram Check for Heterozygotes")
@@ -906,73 +916,73 @@ if analyze_button:
                 st.table(het_df)
 
         with tab2:
-            st.subheader("Exon-based SNP")
+            st.subheader("Exon-based SNP Analysis (Robust)")
 
-            st.write("👉 Display exon SNP comparison or table results here")
-            st.markdown(
-                "**Reference Gene:** [NG_006669.1](https://www.ncbi.nlm.nih.gov/nuccore/NG_006669.1)")
-            st.write("### Exon Alignments Summary")
-            st.write("Total Length of Sequence Analyzed: ",
-                     processed_FASTA['query_length'])
-            st.write("Total Exons Detected: ",
-                     len(processed_FASTA['exon_alignments']))
-            st.write("Exon Processing Results:")
-            for exon in processed_FASTA['exon_alignments']:
-                genomic_pos = []
-                isbt_pos = []
-                type = []
-                ref_base = []
-                alt_base = []
-
-                # Display alignment visualization if available
-                if 'aligned_query' in exon and 'aligned_reference' in exon:
-                    st.write("---")
-                    display_alignment_with_snps(
-                        aligned_query=exon['aligned_query'],
-                        aligned_reference=exon['aligned_reference'],
-                        cds_start=exon.get('cds_start'),
-                        cds_end=exon.get('cds_end'),
-                        variants=exon['variants'],
-                        exon_number=exon['exon_number']
-                    )
-
-                for var in exon['variants']:
-                    # Debug: print available keys
-                    # st.write(f"DEBUG: Variant keys: {list(var.keys())}")
-
-                    genomic_pos.append(var.get('genomic_pos', 'N/A'))
-                    isbt_pos.append(var.get('isbt_pos', 'N/A'))
-                    type.append(var.get('type', 'N/A'))
-                    if var.get('type') == 'deletion':
-                        ref_base.append(get_display_base(
-                            var.get('deleted_sequence')))
-                        alt_base.append('-')
-                    elif var.get('type') == 'insertion':
-                        ref_base.append('-')
-                        alt_base.append(get_display_base(
-                            var.get('inserted_sequence')))
-                    else:
-                        ref_base.append(get_display_base(
-                            var.get('ref_base', var.get('ref', 'N/A'))))
-                        alt_base.append(get_display_base(
-                            var.get('alt_base', var.get('alt', 'N/A'))))
-
-                if exon['variants']:
-                    st.write("**Variant Summary Table:**")
-                    variant_data = {
-                        "Genomic Position": genomic_pos,
-                        "ISBT Position": isbt_pos,
-                        "Type": type,
-                        "Reference Base": ref_base,
-                        "Alternate Base": alt_base
-                    }
-                    df = pd.DataFrame(variant_data)
-
-                    st.dataframe(df, hide_index=True)
+            if not robust_summary:
+                 st.info("No FASTA files processed.")
+            else:
+                 # --- 1. Summary Table ---
+                 st.write("### 📄 Analysis Summary Table")
+                 
+                 summary_data = []
+                 for res in robust_summary:
+                     summary_data.append({
+                         "Filename": res['filename'],
+                         "Exon": res['exon'],
+                         "Coverage (%)": f"{res['coverage']:.1f}%",
+                         "Correctness (%)": f"{res['similarity']:.1f}%",
+                         "Final Decision": res['decision']
+                     })
+                 
+                 st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+                 
+                 # --- 2. Detailed Alignments for Confirmed Exons ---
+                 st.write("### 🔍 Detailed Alignments (Confirmed Only)")
+                 
+                 found_confirmed = False
+                 for res in robust_summary:
+                     if "Confirmed" in res['decision']:
+                         found_confirmed = True
+                         with st.expander(f"✅ {res['filename']} - Exon {res['exon']} Details"):
+                             st.write(f"**Orientation**: {res.get('orientation', 'N/A')}")
+                             st.write(f"**Score**: {res.get('score', 0)}")
+                             
+                             # Use existing display function
+                             # We need to construct 'aligned_query' and 'aligned_reference' from result if available
+                             # identify_variants calls align_sequence_to_exon, which returns aligned_query/ref
+                             if 'aligned_query' in res and 'aligned_reference' in res:
+                                 display_alignment_with_snps(
+                                     aligned_query=res['aligned_query'],
+                                     aligned_reference=res['aligned_reference'],
+                                     cds_start=res.get('cds_start'), # Might be None if not passed, but alignment handles it
+                                     cds_end=res.get('cds_end'),
+                                     variants=res.get('variants', []),
+                                     exon_number=res['exon_number'],
+                                     unique_id=res['filename']
+                                 )
+                                 
+                                 # Variant Table for this file
+                                 if res.get('variants'):
+                                     st.write("**Variants Identified:**")
+                                     v_data = []
+                                     for v in res['variants']:
+                                         v_data.append({
+                                             "ISBT Pos": v.get('isbt_pos'),
+                                             "Type": v.get('type'),
+                                             "Change": f"{v.get('ref_base', '')}>{v.get('alt_base', '')}" if v.get('type') == 'SNP' else f"{v.get('type')}"
+                                         })
+                                     st.dataframe(pd.DataFrame(v_data), hide_index=True)
+                                 else:
+                                     st.success("No variants found (Perfect Match to Reference)")
+                             else:
+                                 st.warning("Alignment details not available.")
+                                 
+                 if not found_confirmed:
+                     st.warning("No exons were confidently confirmed in the uploaded files.")
 
         with tab3:
-            st.subheader("Allele Prediction")
-            st.write("👉 Display predicted alleles or summary results here")
+            st.subheader("Allele Prediction & Strand Analysis")
+            st.write("Analysis of potential genotype combinations based on exon segregation.")
             st.markdown(
                 "**Reference:** [ISBT ABO Alleles Table](https://www.isbtweb.org/resource/001aboalleles.html)")
 
@@ -995,75 +1005,132 @@ if analyze_button:
                     <td style="background-color: #FFD6C9; padding: 8px 12px; border: 2px solid #999; font-weight: bold;">Not Found in Tested Exon</td>
                     <td style="padding: 8px 12px; border: 2px solid #999;">Variant expected but not detected in the tested exon</td>
                 </tr>
-                <tr>
-                    <td style="background-color: #EFECE6; padding: 8px 12px; border: 2px solid #999; font-weight: bold;">Not in Tested Exon</td>
-                    <td style="padding: 8px 12px; border: 2px solid #999;">Variant in exon that was not included in the test</td>
-                </tr>
             </table>
             """
             st.markdown(legend_html, unsafe_allow_html=True)
 
-            st.write("### Predicted ABO Alleles:")
+            if not confirmed_results:
+                 st.info("No confirmed exons to analyze.")
+            else:
+                 abo_id = abo_utils.ABOIdentifier("ABO")
 
-            if possible_alleles:
-                # allele_variants_df = pd.DataFrame(possible_alleles)
-                # st.table(allele_variants_df)
-                st.markdown(
-                    """
-                    <style>
-                    table {
-                        border-collapse: collapse;
-                        width: 100%;
-                        border: 3px solid #999;
-                    }
-                    th, td {
-                        border: 3px solid #ccc;
-                        padding: 8px 12px;
-                        text-align: center;
-                        vertical-align: middle;
-                    }
-                    </style>
-                    """,
-                    unsafe_allow_html=True
-                )
-                html_string = "<table>"
-                html_string += "<tr><th>Allele</th><th>Variant Name</th><th>Exon</th><th>Location</th><th>Change</th></tr>"
-                print("possible alleles = ", possible_alleles)
-                print("node_iupac_map = ", node_iupac_map)
-                print("tested_exons = ", tested_exons)
-                for allele_data in possible_alleles:
-                    for allele_name, variants in allele_data.items():
-                        num_variants = len(variants)
-                        html_string += f"<tr style='border-top: 3px solid #999;'><td rowspan='{num_variants}'>{allele_name}</td>"
-                        for i, variant in enumerate(variants):
-                            hets = False
-                            if variant['name'] in node_iupac_map:
-                                iupac_code = node_iupac_map[variant['name']]
-                                if iupac_code not in ['A', 'T', 'C', 'G']:
-                                    hets = True
+                 # --- 1. Group Files by Exon ---
+                 files_by_exon = {}
+                 for res in confirmed_results:
+                     ex = res['exon_number']
+                     if ex not in files_by_exon:
+                         files_by_exon[ex] = []
+                     files_by_exon[ex].append(res)
+                 
+                 sorted_exons = sorted(files_by_exon.keys())
+                 st.write(f"**Detected Exons:** {', '.join([f'Exon {e} ({len(files_by_exon[e])} files)' for e in sorted_exons])}")
 
-                            if i > 0:
-                                html_string += "<tr>"
-                            if variant['exon'] in tested_exons:
-                                if variant['name'] in variants_name and variant['exon'] in tested_exons:
-                                    if hets:
-                                        iupac_code = node_iupac_map[variant['name']]
-                                        html_string += f"<td style='background-color: #FEC98F;'>{variant['name']} ({iupac_code})</td><td style='background-color: #FEC98F;'>{variant['exon']}</td><td style='background-color: #FEC98F;'>{variant['location']}</td><td style='background-color: #FEC98F;'>{get_display_iupac_change(variant['change'], iupac_code)}</td></tr>"
-                                    else:
-                                        html_string += f"<td style='background-color: #E0FFCC;'>{variant['name']}</td><td style='background-color: #E0FFCC;'>{variant['exon']}</td><td style='background-color: #E0FFCC;'>{variant['location']}</td><td style='background-color: #E0FFCC;'>{variant['change']}</td></tr>"
-                                else:
-                                    html_string += f"<td style='background-color: #FFD6C9;'>{variant['name']}</td><td style='background-color: #FFD6C9;'>{variant['exon']}</td><td style='background-color: #FFD6C9;'>{variant['location']}</td><td style='background-color: #FFD6C9;'>{variant['change']}</td></tr>"
-                            else:
-                                html_string += f"<td style='background-color: #EFECE6;'>{variant['name']}</td><td style='background-color: #EFECE6;'>{variant['exon']}</td><td style='background-color: #EFECE6;'>{variant['location']}</td><td style='background-color: #EFECE6;'>{variant['change']}</td></tr>"
+                 # --- 2. Generate Strand Combinations ---
+                 # Cartesian product of files from each exon
+                 # data_lists = [files_by_exon[e] for e in sorted_exons]
+                 # combinations = list(itertools.product(*data_lists)) # This works if we have at least one file for each exon
+                 
+                 # Optimization: Only combine relevant exons? 
+                 # For now, we combine ALL available exons.
+                 
+                 strand_candidates = list(itertools.product(*[files_by_exon[e] for e in sorted_exons]))
+                 
+                 st.write(f"### 🧬 Strand Combinations (Potential Genotypes)")
+                 st.write(f"Testing {len(strand_candidates)} possible combinations of files...")
+                 
+                 valid_strands_found = 0
+                 
+                 for i, combo in enumerate(strand_candidates):
+                     # combo is a tuple of file_results, one per exon
+                     combo_name = " + ".join([f"{c['filename']} (E{c['exon_number']})" for c in combo])
+                     
+                     # Check if we should display this combo
+                     # Logic: Run identification on the Union of variants
+                     
+                     preds, unk, var_names, node_map = identify_abo_alleles(
+                         {'exon_alignments': list(combo)}, abo_identifier=abo_id)
+                     
+                     if preds:
+                         valid_strands_found += 1
+                         with st.expander(f"✅ Combination {i+1}: matches **{', '.join(list(preds[0].keys()))}** ..."):
+                             st.write(f"**Files:** {combo_name}")
+                             
+                             # Display Prediction Table
+                             html_string = "<table>"
+                             html_string += "<tr><th>Allele</th><th>Variant Name</th><th>Exon</th><th>Location</th><th>Change</th></tr>"
+                             
+                             tested_exons_in_combo = [c['exon_number'] for c in combo]
 
-                html_string += "</table>"
-                st.markdown(html_string, unsafe_allow_html=True)
+                             for allele_data in preds:
+                                for allele_name, allele_variants in allele_data.items():
+                                    num_variants = len(allele_variants)
+                                    html_string += f"<tr style='border-top: 3px solid #999;'><td rowspan='{num_variants}'><b>{allele_name}</b></td>"
+                                    
+                                    for idx, variant in enumerate(allele_variants):
+                                        hets = False
+                                        if variant['name'] in node_map:
+                                            iupac_code = node_map[variant['name']]
+                                            if iupac_code not in ['A', 'T', 'C', 'G']:
+                                                hets = True
+                                        
+                                        if idx > 0:
+                                            html_string += "<tr>"
+                                        
+                                        style = "background-color: #EFECE6;"
+                                        
+                                        # Check if variant exon is in our tested combo
+                                        if variant['exon'] in tested_exons_in_combo:
+                                            if variant['name'] in var_names:
+                                                if hets:
+                                                     style = "background-color: #FEC98F;"
+                                                else:
+                                                     style = "background-color: #E0FFCC;"
+                                            else:
+                                                 style = "background-color: #FFD6C9;"
+                                        
+                                        html_string += f"<td style='{style}'>{variant['name']}</td><td style='{style}'>{variant['exon']}</td><td style='{style}'>{variant['location']}</td><td style='{style}'>{variant['change']}</td></tr>"
+                             
+                             html_string += "</table>"
+                             st.markdown(html_string, unsafe_allow_html=True)
 
-            if unknown_alleles_to_display:
-                st.write("### Unknown ABO Alleles:")
+                 if valid_strands_found == 0:
+                     st.warning("No consistent alleles found for any combination of files.")
 
-                unknown_alleles_df = pd.DataFrame(unknown_alleles_to_display)
-                st.dataframe(unknown_alleles_df, hide_index=True)
+                 st.write("---")
+                 st.write("### 📂 Individual File Analysis (Exon-specific Support)")
+                 
+                 for res in confirmed_results:
+                     filename = res['filename']
+                     exon_num = res['exon_number']
+                     variants = res['variants']
+                     
+                     st.markdown(f"#### 📄 {filename} (Exon {exon_num})")
+                     
+                     if variants:
+                         # Identify based on variants
+                         preds, unk, var_names, node_map = identify_abo_alleles({'exon_alignments': [res]}, abo_identifier=abo_id)
+                         
+                         if preds:
+                             # Simplified view for single file
+                             top_alleles = [list(d.keys())[0] for d in preds[:5]]
+                             st.success(f"Supports: {', '.join(top_alleles)}" + ("..." if len(preds)>5 else ""))
+                         else:
+                            st.warning("Variants detected but no known allele combination matches exactly.")
+
+                         if unk:
+                             st.write("**Unknown Variants:**")
+                             st.dataframe(pd.DataFrame(unk))
+
+                     else:
+                         # Reference Matching Case
+                         st.success("✅ No variants detected (Matches Reference)")
+                         
+                         all_alleles = abo_id.get_all_alleles()
+                         excluded = abo_id.get_alleles_with_variant_in_exon(exon_num)
+                         msg = f"Consistent with {len(all_alleles)} alleles (Total) - {len(excluded)} (Excluded) = {len(all_alleles)-len(excluded)} Candidates."
+                         st.write(msg)
+                     st.write("---")
+
 
 else:
     st.info("Upload files and click **Analyze** to start.")
