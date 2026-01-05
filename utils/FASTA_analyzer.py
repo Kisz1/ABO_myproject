@@ -164,7 +164,7 @@ class FASTAAlignmentService:
             alignment_length = len(aligned_query)
             matches = sum(1 for q, r in zip(aligned_query, aligned_ref)
                         if q == r and q != '-' and r != '-')
-            similarity = matches / alignment_length if alignment_length > 0 else 0
+            similarity = (matches / alignment_length * 100) if alignment_length > 0 else 0
 
             # Get alignment coordinates
             query_start = best_alignment.coordinates[1][0]  # type: ignore
