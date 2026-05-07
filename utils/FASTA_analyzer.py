@@ -762,7 +762,7 @@ class FASTAAlignmentService:
     def identify_variants(self, query_sequence: str) -> Dict:
         """
         Identify the best matching exon and call variants.
-        Uses 2-step verification (Cov > 80%, Sim > 90%) to confirm exon first.
+        Uses 2-step verification (Cov > 80%, Sim > 70%) to confirm exon first.
         
         Args:
             query_sequence: The sequence to analyze
@@ -778,11 +778,11 @@ class FASTAAlignmentService:
         # Filter for confirmed matches
         candidates = []
         for s in stats:
-            if s['coverage'] >= 80.0 and s['similarity'] >= 90.0:
+            if s['coverage'] >= 80.0 and s['similarity'] >= 70.0:
                 candidates.append(s)
         
         if not candidates:
-            return {'error': 'No exon confirmed (Requires >80% Cov, >90% Match)'}
+            return {'error': 'No exon confirmed (Requires >80% Cov, >70% Match)'}
         
         # Pick best candidate (highest score)
         best = max(candidates, key=lambda x: x['score'])

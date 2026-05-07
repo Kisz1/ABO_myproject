@@ -1,0 +1,70 @@
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
+
+from utils.FASTA_analyzer import FASTAAlignmentService
+from utils.abo_identifier import ABOIdentifier
+from utils.rhd_analyzer import RHDAnalyzer
+
+
+@dataclass
+class BloodGroupSystemConfig:
+    key: str
+    display_name: str
+    description: str
+    upload_types: List[str]
+    accepts_multiple_files: bool
+    analyzer_factory: Optional[Callable[[], Any]] = None
+    analyze_method: Optional[Callable[[Any, str], Any]] = None
+    identifier_factory: Optional[Callable[[], Any]] = None
+
+
+_system_registry: Dict[str, BloodGroupSystemConfig] = {}
+
+
+def register_system(config: BloodGroupSystemConfig) -> BloodGroupSystemConfig:
+    _system_registry[config.key] = config
+    return config
+
+
+def get_system(key: str) -> Optional[BloodGroupSystemConfig]:
+    return _system_registry.get(key)
+
+
+def get_available_system_keys() -> List[str]:
+    return list(_system_registry.keys())
+
+
+def analyze_abo(analyzer: Any, query_sequence: str) -> Any:
+    return analyzer.identify_variants(query_sequence)
+
+
+def analyze_rhd(analyzer: Any, query_sequence: str) -> Any:
+    return analyzer.analyze(query_sequence)
+
+
+# Register supported systems here.
+# Future systems can be added by adding a new BloodGroupSystemConfig entry.
+register_system(
+    BloodGroupSystemConfig(
+        key="ABO",
+        display_name="ABO",
+        description="Exon-based ABO blood group analysis using reference exon sequences.",
+        upload_types=["fasta", "fa", "txt"],
+        accepts_multiple_files=True,
+        analyzer_factory=lambda: FASTAAlignmentService(gene="ABO"),
+        analyze_method=analyze_abo,
+        identifier_factory=lambda: ABOIdentifier("ABO")
+    )
+)
+
+register_system(
+    BloodGroupSystemConfig(
+        key="RHD",
+        display_name="RHD",
+        description="Full RHD sequence analysis using GenBank reference and variant calling.",
+        upload_types=["fasta", "fa", "ab1"],
+        accepts_multiple_files=False,
+        analyzer_factory=lambda: RHDAnalyzer(),
+        analyze_method=analyze_rhd,
+    )
+)

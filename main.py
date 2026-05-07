@@ -10,11 +10,87 @@ import io
 import utils.FASTA_analyzer as fasta_utils
 import utils.ab1_analyzer as ab1_utils
 import utils.abo_identifier as abo_utils
+from utils.rhd_analyzer import RHDAnalyzer
+from utils.isbt_handler import ISBTDataHandler
+from utils.bloodgroup import get_system, get_available_system_keys
 
 import plotly.graph_objects as go
 import itertools
 
 st.set_page_config(layout="wide")
+
+# Built-in RHD reference sequences
+RHD_POSITIVE_REFERENCE = (
+    "ACTTCACCCTAAGGCTGGATCAGGATCCCCTCCAGGTTTTTACTAGAGCCAAACCCACATCTCCTTTCTCTTCTGCCACCC"
+    "CCCCTTAAAATGCTTAGAAACACATAGATTTAAATACAAGTTCAAATGTAAGTAATTTCAACTGTGTAACTATGAGGAGTCA"
+    "ATTCTACGTGGGTCCTATCTGTATCCTCCCCAGGGCTCAGCTCCATTCTTTGCTTTCATTCATTCTCATTCAATACATTGTT"
+    "GTTAAGAGCTCACTGGGTGCCCTCTCTGTCATGTAGTAAGGTTTTAAAAAGAAAGCCTCTTCTGAGCTTCAGTTTCCTTATTT"
+    "ATAAAATAGGAATATTGATCTGTTCCTTGCTTTTCTTACAAGGATATGCTGAAGATGACTGAAGTACAGAGTAAAGAAGGATTA"
+    "TGTTTGGGTATCAAAGGAATAGAATGCCCTCTTTCAAACTGAGCACAGCAGGAACCTGTAACAGGAACACAGCAACTTGTTGA"
+    "ATGAATGACAATATTGGAAAACATACATTTCCTCCCCTCCCCATCATAGTCCCTCTGCTTCCGTGTTAACTCCATAGACAGGCC"
+    "AGCACAGCCAGCCTTGAAGCCTGAGATAAGGCCTTTGGCGGGTGTCTCCCCTATCGCTCCCTCAAGCCCTCAAGTAGGTGTTGG"
+    "AGAGAGGGGTGATGCCTGGTGCTGGTGGAACCCCTGCACAGAGACGGACACAGGATGAGCTCTAAGTACCCGCGGTCTGTCCGG"
+    "CGCTGCCTGCCCCTCTGGGCCCTAACACTGGAAGCAGCTCTCATTCTCCTCTTCTATTTTTTTACCCACTATGACGCTTCCTTA"
+    "GAGGATCAAAAGGGGCTCGTGGCATCCTATCAAGGTGAGAGTTCATTGGAACAGTGGTCACAGGAGCAAATAGCAGGGGCAGGG"
+    "GCGGGGGAGGCCTATGGTTCTCCAGGGGCACAGATG"
+)
+
+RHD_NEGATIVE_REFERENCE = (
+    "GATGAACCGACGCGCGGTATTGATGTCGGGGCGAAGTTTGAAATTTATCAGTTAATTGCCGAACTGGCGAAGAAAGGCAAGGA"
+    "ACATCTGTGCCCCTGGAGAACCATAGGCCTCCCCCGCCCCTGCCCCTGCTATTTGCTCCTGTGACCACTGTTCCAATGAACTC"
+    "TCACCTTGATAGGATGCCACGAGCCCCTTTTGATCCTCTAAGGAAGCGTCATAGTGGGTAAAAAAATAGAAGAGGAGAATGAGA"
+    "GCTGCTTCCAGTGTTAGGGCCCAGAGGGGCAGGCAGCGCCGGACAGACCGCGGGTACTTAGAGCTCATCCTGTGTCCGTCTCTG"
+    "TGCAGGGGTTCCACCAGCACCAGGCATCACCCCTCTCTCCAACACCTACTTGAGGGCTTGAGGGAGCGATAGGGGAGACACCCG"
+    "CCAAAGGCCTTATCTCAGGCTTCAAGGCTGGCTGTGCTGGCCTGTCTATGGAGTTAACACGGAAGCAGAGGGACTATGATGGGG"
+    "AGGGGAGGAAATGTATGTTTTCCAATATTGTCATTCATTCAACAAGTTGCTGTGTTCCTGTTACAGGTTCCTGCTGTGCTCAGT"
+    "TTGAAAGAGGGCATTCTATTCCTTTGATACCCAAACATAATCCTTCTTTACTCTGTACTTCAGTCATCTTCAGCATATCCTTGT"
+    "AAGAAAAGCAAGGAACAGATCAATATTCCTATTTTATAAATAAGGAAACTGAAGCTCAGAAGAGGCTTTCTTTTTAAAACCTTA"
+    "CTACATGACAGAGAGGGCACCCAGTGAGCTCTTAACAACAATGTATTGAATGAGAATGAATGAAAGCAAAGAATGGAGCTGAGC"
+    "CCTGGGGAGGATACAGATAGGACCCACGTAGAATTGACTCCTCATAGTTACACAGTTGAAATTACTTACATTTGAACTTGTAT"
+    "TTAAATCTATGTGTTTCTAAGCATTTTAAGGGGGGGTGGCAGAAGAGAAAGGAGATGTGGGTTTGGCTCTAGTAAAAACCTGGA"
+    "GGGATCCTGATCCAGCCTTAGGGTGAAGTTGCTCTGGATAATATTGGTCTGACTTCGCCGTTGATGTTG"
+)
+
+RHD_REFERENCE_OPTIONS = [
+    "Built-in positive reference",
+    "Built-in negative reference",
+    "Upload custom reference"
+]
+
+
+def load_rhd_amplicon_references(gb_path="utils/data/rhd_referance.gb"):
+    try:
+        record = SeqIO.read(gb_path, "genbank")
+        seq = str(record.seq)
+        exon_positions = []
+
+        for feature in record.features:
+            if feature.type == "exon" and "number" in feature.qualifiers:
+                exon_positions.append(
+                    (int(feature.qualifiers["number"][0]),
+                     int(feature.location.start),
+                     int(feature.location.end))
+                )
+
+        exon_positions.sort()
+        if len(exon_positions) < 6:
+            raise ValueError("RHD reference requires at least 6 exon annotations")
+
+        rhd1_start = exon_positions[0][1]
+        rhd1_end = min(len(seq), rhd1_start + 951)
+        rhd1_ref = seq[rhd1_start:rhd1_end]
+
+        rhd456_start = max(0, exon_positions[3][1] - 100)
+        rhd456_end = min(len(seq), exon_positions[5][2] + 100)
+        rhd456_ref = seq[rhd456_start:rhd456_end]
+
+        return rhd1_ref, rhd456_ref
+    except Exception as e:
+        st.warning(f"Unable to load RHD amplicon reference fragments: {e}")
+        return RHD_POSITIVE_REFERENCE, RHD_POSITIVE_REFERENCE
+
+
+RHD1_REFERENCE, RHD456_REFERENCE = load_rhd_amplicon_references()
 
 IUPAC_CODES = {
     'A':	'A',
@@ -159,9 +235,10 @@ def plot_chromatogram_plotly(trace, base_width=2, hetero_sites=None,
                 hovertemplate=f"Pos {pos}<br>{hover_text}<extra></extra>"
             ))
 
-    exon_label = f"{cds_start}-{cds_end}" if cds_start is not None and cds_end is not None else "?"
+    exon_label = trace.get('exon')
+    title_label = f"ABO Exon {exon_label}" if exon_label is not None else "Raw Trace"
     fig.update_layout(
-        title=f"Chromatogram –  ABO Exon: {trace['exon']} (len={seq_len})",
+        title=f"Chromatogram – {title_label} (len={seq_len})",
         width=width_px,
         height=400,
         xaxis_title="Genomic Position" if cds_start else "Base Index",
@@ -364,9 +441,26 @@ def process_ab1_files(fwd_ab1_files, exons_ref, threshold_ratio=0.3):
     if traces:
         merged_reverse = ab1_service.reverse_chromatogram(traces)
         merged_norm = ab1_service.normalize_trace_per_channel(merged_reverse)
-        hets = ab1_service.detect_hetero(merged_reverse, ratio=threshold_ratio)
+        raw_hets = ab1_service.detect_hetero(merged_reverse, ratio=threshold_ratio)
+        hets = []
+        for position, top_bases in raw_hets:
+            major_base, major_signal = top_bases[0]
+            minor_base, minor_signal = top_bases[1]
+            ratio = minor_signal / (major_signal + 1e-6)
+            hets.append({
+                "position": position,
+                "ref_base": major_base,
+                "alt_base": minor_base,
+                "ratio": ratio,
+                "major_signal": major_signal,
+                "minor_signal": minor_signal,
+                "top_bases": top_bases
+            })
 
-        results = ab1_service.extract_exon_traces(merged_reverse, exons_ref)
+        # For AB1 files: Return the full traces as-is for RHD analysis
+        # (AB1 files are typically RHD sequences, not ABO exon-specific)
+        # We'll extract the sequence for RHD variant analysis later
+        results = [merged_reverse]  # Wrap in list to maintain consistency
         return results, hets
 
     return None, None
@@ -500,17 +594,156 @@ def process_fasta_file(fasta_file, exon_start=0, exon_end=0):
     return selected_strand, exons_ref
 
 
-def handle_IUPAC_codes(abo_identifier, i, types):
-    print(i)
+def analyze_rhd_multifactor(ab1_traces):
+    """
+    Analyze RHD by auto-detecting the amplicon region using built-in RHD1 and RHD456 references.
+    """
+    rhd1_analyzer = RHDAnalyzer(reference_seq=RHD1_REFERENCE)
+    rhd456_analyzer = RHDAnalyzer(reference_seq=RHD456_REFERENCE)
+    amplicon_results = []
+
+    for i, trace in enumerate(ab1_traces):
+        if not isinstance(trace, dict):
+            continue
+
+        query_seq = trace.get('seq', '')
+        if not query_seq or len(query_seq) < 50:
+            continue
+
+        query_length = len(query_seq)
+        rhd1_result = rhd1_analyzer.analyze(query_seq)
+        rhd456_result = rhd456_analyzer.analyze(query_seq)
+
+        rhd1_identity = rhd1_result.get('identity', 0.0)
+        rhd456_identity = rhd456_result.get('identity', 0.0)
+        rhd1_score = rhd1_result.get('score', 0.0)
+        rhd456_score = rhd456_result.get('score', 0.0)
+        rhd1_variants = rhd1_result.get('variants', [])
+        rhd456_variants = rhd456_result.get('variants', [])
+
+        if rhd1_identity > rhd456_identity:
+            matched_region = 'RHD1'
+            matched_reference = RHD1_REFERENCE
+            matched_identity = rhd1_identity
+            matched_variants = rhd1_variants
+            matched_score = rhd1_score
+            reference_description = 'RHD1_ref (Exon 1 region)'
+        else:
+            matched_region = 'RHD456'
+            matched_reference = RHD456_REFERENCE
+            matched_identity = rhd456_identity
+            matched_variants = rhd456_variants
+            matched_score = rhd456_score
+            reference_description = 'RHD456_ref (Exons 4-6 region)'
+
+        variant_count = len(matched_variants)
+        reference_length = len(matched_reference)
+
+        result = {
+            'amplicon_index': i,
+            'query_length': query_length,
+            'reference_length': reference_length,
+            'matched_region': matched_region,
+            'reference_description': reference_description,
+            'matched_identity': round(matched_identity, 1),
+            'matched_score': round(matched_score, 1),
+            'identity': round(matched_identity, 1),
+            'variant_count': variant_count,
+            'variants': matched_variants,
+            'score_1': round(rhd1_identity, 1),
+            'score_456': round(rhd456_identity, 1),
+            'region_assignment_reason': f'{matched_region} selected because identity {matched_identity:.1f}% was higher than the alternate region',
+        }
+
+        if matched_region == 'RHD1':
+            if query_length >= 800:
+                result['phenotype'] = 'RhD- (D negative)'
+                result['reason'] = (
+                    'Long RHD1-aligned sequence (≥800 bp) indicates RHCE amplification, not RHD1 amplicon')
+                result['rule'] = 'RHD1 Length Rule (≥800 bp)'
+            elif matched_identity >= 90.0:
+                result['phenotype'] = 'RhD+ (D positive)'
+                result['reason'] = (
+                    f'RHD1 amplicon with high identity ({matched_identity:.1f}%) suggests RHD gene present')
+                result['rule'] = 'RHD1 Identity Rule (≥90%)'
+            else:
+                result['phenotype'] = 'Inconclusive - confirm required'
+                result['reason'] = (
+                    f'RHD1 amplicon identity below 90% ({matched_identity:.1f}%) - unable to call with confidence')
+                result['rule'] = 'RHD1 Identity Rule (<90%)'
+        else:
+            result['identity'] = round(matched_identity, 1)
+            if matched_identity >= 90.0 and variant_count <= 15:
+                result['phenotype'] = 'RhD+ (D positive)'
+                result['reason'] = (
+                    f'RHD456 amplicon with identity {matched_identity:.1f}% and {variant_count} variants = RHD gene present')
+                result['rule'] = 'RHD456 Identity/Variant Rule (≥90%, ≤15 variants)'
+            elif matched_identity < 85.0:
+                result['phenotype'] = 'RhD- (D negative)'
+                result['reason'] = (
+                    f'RHD456 identity below 85% ({matched_identity:.1f}%) = RHD gene absent')
+                result['rule'] = 'RHD456 Identity Rule (<85%)'
+            else:
+                result['phenotype'] = 'RHD Variant - confirm required'
+                result['reason'] = (
+                    f'RHD456 identity {matched_identity:.1f}% with {variant_count} variants requires further review')
+                result['rule'] = 'RHD456 Variant Rule (85-90% or >15 variants)'
+
+        if matched_region == 'RHD456':
+            result['identity'] = round(matched_identity, 1)
+        amplicon_results.append(result)
+
+    return amplicon_results
+
+
+def consolidate_rhd_results(amplicon_results):
+    """
+    Consolidate per-amplicon RHD results into a final verdict.
+    If multiple amplicons: check agreement. If single: use that result.
+    """
+    if not amplicon_results:
+        return None
+    
+    if len(amplicon_results) == 1:
+        return amplicon_results[0]
+    
+    phenotypes = [r.get('phenotype', 'Unknown') for r in amplicon_results]
+    positive_count = sum(1 for p in phenotypes if 'RhD+' in p)
+    negative_count = sum(1 for p in phenotypes if 'RhD-' in p)
+    
+    if positive_count == len(amplicon_results):
+        result = amplicon_results[0].copy()
+        result['phenotype'] = 'RhD+ (confirmed)'
+        result['reason'] = 'All amplicons indicate RHD gene present'
+        result['multi_amplicon'] = True
+    elif negative_count == len(amplicon_results):
+        result = amplicon_results[0].copy()
+        result['phenotype'] = 'RhD- (confirmed)'
+        result['reason'] = 'All amplicons indicate RHD gene absent'
+        result['multi_amplicon'] = True
+    else:
+        result = {
+            'phenotype': 'Inconclusive',
+            'reason': 'Results inconsistent across amplicons',
+            'multi_amplicon': True,
+            'amplicon_count': len(amplicon_results)
+        }
+    
+    return result
+
     types_list = {'SNP': 'alt_base', 'insertion': 'inserted_sequence',
                   'deletion': 'deleted_sequence'}
     het_variants = []
     var_nodes = []
     unknown = []
-    variant_base = i[types_list[types]]
-    possible_bases = IUPAC_CODES.get(variant_base, "").split(" or ")
-    print(i['isbt_pos'], possible_bases)
+    variant_base = i.get(types_list[types], "")
+    possible_bases = IUPAC_CODES.get(variant_base, variant_base).split(" or ")
+    ref_base = i.get('ref_base')
+
     for base in possible_bases:
+        if not base:
+            continue
+
         field = types_list[i['type']]
         var_node = None
         if i['type'] == 'deletion':
@@ -521,15 +754,13 @@ def handle_IUPAC_codes(abo_identifier, i, types):
                 i['isbt_pos'], "", base, variant_base)
         else:
             var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], i['ref_base'], base, variant_base)
+                i['isbt_pos'], ref_base, base, variant_base)
 
         if var_node is not None:
-            print(var_node)
             var_nodes.append(var_node)
             het_variants.append(i[field])
         else:
-            if base != i['ref_base']:
-
+            if ref_base is None or base != ref_base:
                 unknown.append(i)
     return var_nodes, het_variants, unknown
 
@@ -645,11 +876,16 @@ st.title("🧬 ABO blood group analysis")
 
 # Upload section
 # with st.sidebar:
-fwd_ab1 = st.sidebar.file_uploader("Upload  AB1 file", type=[
+fwd_ab1 = st.sidebar.file_uploader("Upload AB1 file", type=[
     "ab1"], accept_multiple_files=True, help="You can upload multiple files for batch processing.")
 
-fasta_files = st.sidebar.file_uploader(
-    "Upload exon-specific FASTA", type=["fasta", "fa", "fas"], accept_multiple_files=True)
+abo_fasta_files = st.sidebar.file_uploader(
+    "Upload ABO FASTA", type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help="Upload exon-specific FASTA files for ABO analysis only.")
+
+rhd_reference_choice = "Built-in positive reference"
+rhd_ref_fasta_files = None
+
 exon_start = st.sidebar.number_input(
     "Exon start (optional)", min_value=0, value=0)
 exon_end = st.sidebar.number_input(
@@ -671,9 +907,219 @@ def get_cds(exon_number):
     return None, None
 
 
+def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt_handler, has_fasta, rhd_reference_seq=None):
+    """
+    Generate a comprehensive final blood group summary from all analyzed systems.
+
+    Args:
+        robust_summary: ABO analysis results from FASTA files
+        processed_AB1: AB1 processing results (for RHD)
+        hets: Heterozygote data
+        isbt_handler: ISBT handler for phenotype suggestions
+        has_fasta: bool indicating whether FASTA files were uploaded
+
+    Returns:
+        Dictionary with final blood group summary
+    """
+    summary = {
+        'abo': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'message': None},
+        'rhd': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'identity': None, 'query_length': None, 'reference_length': None, 'note': None}
+    }
+
+    # ABO Analysis Summary
+    if not has_fasta:
+        summary['abo']['status'] = 'missing_data'
+        summary['abo']['message'] = 'ABO analysis requires FASTA file upload.'
+    elif robust_summary and isinstance(robust_summary, list) and len(robust_summary) > 0:
+        confirmed_results = [r for r in robust_summary if "Confirmed" in r.get('decision', "")]
+
+        if confirmed_results and len(confirmed_results) > 0:
+            # Extract all variants from confirmed exons
+            all_variants = []
+            for result in confirmed_results:
+                if result.get('variants'):
+                    for variant in result['variants']:
+                        if variant.get('isbt_pos'):
+                            all_variants.append(f"c.{variant['isbt_pos']}{variant.get('type', '')}")
+
+            if all_variants and len(all_variants) > 0:
+                # Get ABO phenotype suggestions
+                abo_suggestion = isbt_handler.suggest_blood_group_from_variants(all_variants, "ABO")
+                if abo_suggestion['status'] == 'matched':
+                    summary['abo']['phenotype'] = abo_suggestion['phenotypes'][0] if abo_suggestion['phenotypes'] else None
+                    summary['abo']['alleles'] = [allele.get('name', '') for allele in abo_suggestion['matches']]
+                summary['abo']['status'] = 'analyzed'
+                summary['abo']['variants'] = all_variants
+            else:
+                summary['abo']['status'] = 'no_variants'
+                summary['abo']['phenotype'] = 'Reference'  # No variants = reference phenotype
+        else:
+            # Results exist but none are confirmed
+            summary['abo']['status'] = 'not_confirmed'
+            summary['abo']['phenotype'] = 'Awaiting confirmation'
+            summary['abo']['message'] = 'No confirmed exon matches were found in the FASTA results.'
+    else:
+        summary['abo']['status'] = 'failed'
+        summary['abo']['message'] = 'No ABO FASTA results were produced.'
+
+    # RHD Analysis Summary - Multi-Factor Decision Tree
+    if processed_AB1 and isinstance(processed_AB1, list) and len(processed_AB1) > 0:
+        try:
+            amplicon_results = analyze_rhd_multifactor(processed_AB1)
+            consolidated = consolidate_rhd_results(amplicon_results)
+            
+            if consolidated:
+                summary['rhd']['status'] = 'analyzed'
+                summary['rhd']['phenotype'] = consolidated.get('phenotype')
+                summary['rhd']['reason'] = consolidated.get('reason')
+                summary['rhd']['amplicon_results'] = amplicon_results
+                summary['rhd']['variants'] = consolidated.get('variants', [])
+                if len(amplicon_results) == 1:
+                    r = amplicon_results[0]
+                    summary['rhd']['identity'] = r.get('identity')
+                    summary['rhd']['query_length'] = r.get('query_length')
+                    summary['rhd']['reference_length'] = r.get('reference_length')
+                    summary['rhd']['rule_applied'] = r.get('rule')
+            else:
+                summary['rhd']['status'] = 'no_sequence'
+                summary['rhd']['phenotype'] = 'No valid sequences'
+                
+        except Exception as e:
+            st.warning(f"⚠️ RHD analysis error: {str(e)}")
+            summary['rhd']['status'] = 'error'
+            summary['rhd']['phenotype'] = 'Analysis failed'
+
+    return summary
+
+
+def display_final_blood_group_result(summary):
+    """
+    Display the final blood group result prominently at the top of analysis results.
+
+    Args:
+        summary: Blood group summary from generate_final_blood_group_summary
+    """
+    st.markdown("---")
+    st.markdown("## 🩸 **FINAL BLOOD GROUP RESULT**")
+
+    # Create a prominent display
+    result_parts = []
+
+    # ABO result
+    if summary['abo']['status'] == 'analyzed' and summary['abo']['phenotype']:
+        result_parts.append(f"**ABO: {summary['abo']['phenotype']}**")
+    elif summary['abo']['status'] == 'no_variants':
+        result_parts.append("**ABO: Reference**")
+    else:
+        result_parts.append("*ABO: Not analyzed*")
+
+    # RHD result
+    if summary['rhd']['status'] == 'analyzed' and summary['rhd']['phenotype']:
+        result_parts.append(f"**RHD: {summary['rhd']['phenotype']}**")
+    else:
+        result_parts.append("*RHD: Not analyzed*")
+
+    # Display the result
+    final_result = " | ".join(result_parts)
+
+    # Create a styled box for the result
+    st.markdown(f"""
+    <div style="
+        background-color: #f0f8ff;
+        border: 3px solid #4CAF50;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 10px 0;
+        text-align: center;
+        font-size: 24px;
+        font-weight: bold;
+        color: #2E7D32;
+    ">
+        {final_result}
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Additional details in expandable section
+    with st.expander("📋 Detailed Analysis Results", expanded=False):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### ABO System")
+            if summary['abo']['status'] == 'analyzed':
+                if summary['abo']['phenotype']:
+                    st.success(f"Phenotype: {summary['abo']['phenotype']}")
+                if summary['abo']['alleles']:
+                    st.info(f"Matching alleles: {', '.join(summary['abo']['alleles'])}")
+                if summary['abo']['variants']:
+                    st.write(f"**Variants detected:** {', '.join(summary['abo']['variants'])}")
+            elif summary['abo']['status'] == 'no_variants':
+                st.info("No variants detected - Reference phenotype")
+            elif summary['abo']['status'] == 'missing_data':
+                st.warning("ABO analysis not performed: FASTA file required for ABO.")
+                if summary['abo']['message']:
+                    st.write(summary['abo']['message'])
+            elif summary['abo']['status'] == 'failed':
+                st.error("ABO analysis failed to produce results.")
+                if summary['abo']['message']:
+                    st.write(summary['abo']['message'])
+            else:
+                st.warning("ABO analysis not performed")
+
+        with col2:
+            st.markdown("### RHD System")
+            if summary['rhd']['status'] == 'analyzed':
+                if summary['rhd']['phenotype']:
+                    st.success(f"Phenotype: {summary['rhd']['phenotype']}")
+                if summary['rhd'].get('identity') is not None:
+                    st.write(f"Identity: {summary['rhd']['identity']}%")
+                if summary['rhd'].get('query_length') is not None and summary['rhd'].get('reference_length') is not None:
+                    st.write(f"Sequence length: {summary['rhd']['query_length']} bp vs reference {summary['rhd']['reference_length']} bp")
+                if summary['rhd']['alleles']:
+                    st.info(f"Matching alleles: {', '.join(summary['rhd']['alleles'])}")
+                if summary['rhd']['variants']:
+                    st.write(f"**Variants detected:** {', '.join(summary['rhd']['variants'])}")
+                else:
+                    st.write("**Variants:** None (Wild-type/Reference)")
+                if summary['rhd'].get('note'):
+                    st.warning(summary['rhd']['note'])
+            else:
+                st.warning("RHD analysis not performed")
+
+
 # --- Main Panel ---
 st.title("Genetic Analysis Dashboard")
 
+# How to Use the App section
+with st.expander("📖 How to Use the App", expanded=False):
+    st.markdown("""
+    ### Quick Start Guide
+    
+    **1. Upload your sample file**
+    - Drag & drop your .ab1 (Sanger) or .fasta file in the sidebar
+    - For RHD analysis, upload a single AB1 or FASTA file
+    - For ABO analysis, upload multiple exon-specific FASTA files
+    
+    **2. Select blood group system**
+    - Choose from the left sidebar: ABO, RHD, RHCE, Kell, Duffy, Kidd, H
+    - Each system has specific upload requirements
+    
+    **3. Configure analysis settings**
+    - Adjust heterozygosity threshold if needed (default: 0.3)
+    - Set exon ranges for targeted analysis (optional)
+    
+    **4. Run analysis**
+    - Click the "Analyze" button to start processing
+    - The app automatically aligns sequences, detects variants, and reports blood group systems
+    
+    **5. View results**
+    - Check chromatogram analysis for heterozygotes
+    - Review exon-based SNPs and variant details
+    - See automatic blood group suggestions
+    - Browse ISBT allele database information
+    
+    **6. Export data**
+    - Download results as CSV files for further analysis
+    """)
 
 # Tabs for displaying results
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -855,19 +1301,48 @@ Blood Transfusion Science,<br> Faculty of Associated Medical Sciences<br>
         st.error(f"Error loading student data: {e}")
 
 if analyze_button:
-    if not fwd_ab1 and not fasta_files:
-        st.warning("Please upload at least one file before analyzing.")
+    if not fwd_ab1 and not abo_fasta_files:
+        st.warning("Please upload at least one AB1 or ABO FASTA file before analyzing.")
     else:
         status_container = st.empty()
         status_container.success("Files uploaded successfully! Starting analysis...")
 
         # --- Robust Processing Logic ---
         robust_summary = []
-        if fasta_files:
+        exons_ref = []
+        
+        # ALWAYS load exon reference data (needed for RHD AB1 analysis)
+        try:
             service = fasta_utils.FASTAAlignmentService()
-            # Generate Robust Summary
-            robust_summary = service.generate_batch_summary(fasta_files)
+            exons_data = service.getABO_ref("exons")
+            # Transform exons to match ab1_analyzer expectations
+            exons_ref = [
+                {
+                    "exon": e.get("exon_number"),
+                    "ref_start": e.get("start"),
+                    "ref_end": e.get("end"),
+                    "cds_start": e.get("cds_start"),
+                    "cds_end": e.get("cds_end")
+                }
+                for e in exons_data
+            ]
+            st.info(f"✓ Loaded {len(exons_ref)} exon reference sequences")
+        except Exception as e:
+            st.error(f"Error loading exon reference data: {e}")
+            exons_ref = []
+        
+        # Process ABO FASTA files for ABO analysis only
+        if abo_fasta_files:
+            try:
+                robust_summary = service.generate_batch_summary(abo_fasta_files)
+                st.info(f"✓ Processed {len(abo_fasta_files)} ABO FASTA file(s)")
+            except Exception as e:
+                st.error(f"Error processing ABO FASTA files: {e}")
+                robust_summary = []
 
+        # Process AB1 files for RHD analysis (if uploaded)
+        if fwd_ab1:
+            st.info(f"Processing {len(fwd_ab1)} AB1 file(s) with {len(exons_ref)} exon references...")
         processed_AB1, hets = process_ab1_files(
             fwd_ab1, exons_ref, threshold_ratio) if fwd_ab1 else (None, None)
 
@@ -889,6 +1364,52 @@ if analyze_button:
         
         status_container.empty()
 
+        # Always use built-in RHD positive reference
+        st.info("✓ Using built-in RhD+ reference (WHO standard)")
+
+        # Generate and display final blood group summary immediately
+        isbt_handler = ISBTDataHandler()
+        final_summary = generate_final_blood_group_summary(
+            robust_summary,
+            processed_AB1,
+            hets,
+            isbt_handler,
+            bool(abo_fasta_files),
+            None  # Always use built-in reference now
+        )
+        display_final_blood_group_result(final_summary)
+        
+        # Debug output to show what data was captured
+        with st.expander("🔧 Debug Info - Analysis Data"):
+            debug_col1, debug_col2 = st.columns(2)
+            with debug_col1:
+                st.write(f"**ABO FASTA files uploaded:** {len(abo_fasta_files) if abo_fasta_files else 0}")
+                st.write(f"**ABO results found:** {len(robust_summary) if robust_summary else 0}")
+                if robust_summary:
+                    for i, res in enumerate(robust_summary):
+                        st.write(f"  - File {i+1}: {res.get('filename', 'N/A')} | Decision: {res.get('decision', 'N/A')}")
+            with debug_col2:
+                st.write(f"**AB1 files uploaded:** {len(fwd_ab1) if fwd_ab1 else 0}")
+                st.write(f"**RHD references:** Built-in RHD1 and RHD456 region references")
+                
+                if final_summary.get('rhd', {}).get('amplicon_results'):
+                    st.write(f"**RHD amplicons analyzed:** {len(final_summary['rhd']['amplicon_results'])}")
+                    for i, result in enumerate(final_summary['rhd']['amplicon_results']):
+                        st.write(f"**Amplicon {i+1}:**")
+                        st.write(f"  - Matched reference: {result.get('reference_description')}")
+                        st.write(f"  - Query length: {result.get('query_length')} bp")
+                        st.write(f"  - Reference length: {result.get('reference_length')} bp")
+                        st.write(f"  - RHD1 identity: {result.get('score_1')}%")
+                        st.write(f"  - RHD456 identity: {result.get('score_456')}%")
+                        st.write(f"  - Chosen region: {result.get('matched_region')} ({result.get('region_assignment_reason')})")
+                        if result.get('matched_region') == 'RHD456':
+                            st.write(f"  - Identity: {result.get('identity')}%")
+                        st.write(f"  - Variant count: {result.get('variant_count')}")
+                        st.write(f"  - Rule applied: {result.get('rule')}")
+                        st.write(f"  - Decision: {result.get('phenotype')}")
+                
+                st.write(f"**Heterozygote positions:** {len(hets) if hets else 0}")
+
         with tab1:
             st.subheader("Chromatogram Check for Heterozygotes")
             st.write("### Heterozygote Positions Detected: ",
@@ -900,11 +1421,15 @@ if analyze_button:
             ]
             if processed_AB1:
                 for i in processed_AB1:  # type: ignore
-                    x = i['exon']
-                    cds_start, cds_end = get_cds(x)
+                    if isinstance(i, dict) and 'exon' in i:
+                        x = i['exon']
+                        cds_start, cds_end = get_cds(x)
+                    else:
+                        x = None
+                        cds_start, cds_end = None, None
 
                     fig = plot_chromatogram_plotly(
-                        i, base_width=2,  cds_start=cds_start, cds_end=cds_end, hetero_sites=hetero_sites)
+                        i, base_width=2, cds_start=cds_start, cds_end=cds_end, hetero_sites=hetero_sites)
                     st.plotly_chart(fig, width='stretch')
 
             if hets:

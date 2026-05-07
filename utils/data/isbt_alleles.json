@@ -1,0 +1,131 @@
+{
+  "ABO": {
+    "A": {
+      "allele_name": "A",
+      "gene": "ABO",
+      "system": "ABO",
+      "phenotype": "A",
+      "genotype": "AA or AO",
+      "variants": ["c.261del28", "c.156delA", "c.297_298insTA"],
+      "description": "ABO system - A allele"
+    },
+    "B": {
+      "allele_name": "B",
+      "gene": "ABO",
+      "system": "ABO",
+      "phenotype": "B",
+      "genotype": "BB or BO",
+      "variants": ["c.526C>G", "c.703G>A"],
+      "description": "ABO system - B allele"
+    },
+    "O": {
+      "allele_name": "O",
+      "gene": "ABO",
+      "system": "ABO",
+      "phenotype": "O",
+      "genotype": "OO",
+      "variants": ["c.261delA", "c.1A>G"],
+      "description": "ABO system - O allele (null allele)"
+    }
+  },
+  "RHD": {
+    "RHD": {
+      "allele_name": "RHD",
+      "gene": "RHD",
+      "system": "RH",
+      "phenotype": "D+",
+      "genotype": "DD or Dd",
+      "variants": ["c.47G>A", "c.428G>C (exon 5)", "c.1136C>T"],
+      "description": "RHD - D positive allele (common)"
+    },
+    "RHD_variant": {
+      "allele_name": "RHD (Variant)",
+      "gene": "RHD",
+      "system": "RH",
+      "phenotype": "D variant",
+      "genotype": "Dd",
+      "variants": ["c.47G>A", "c.1136C>T"],
+      "description": "RHD with weak D expression"
+    },
+    "RHCCE": {
+      "allele_name": "RHCE (Ce allele)",
+      "gene": "RHCE",
+      "system": "RH",
+      "phenotype": "cCe",
+      "genotype": "cCeR",
+      "variants": ["c.48C>G and c.676G>C"],
+      "description": "RHCE - Ce combination"
+    }
+  },
+  "KELL": {
+    "KEL1": {
+      "allele_name": "K",
+      "gene": "KEL",
+      "system": "KELL",
+      "phenotype": "K+",
+      "genotype": "K+/K+ or K+/k+",
+      "variants": ["c.385T>C (p.Met129Thr)"],
+      "description": "KELL system - K antigen"
+    },
+    "KEL2": {
+      "allele_name": "k",
+      "gene": "KEL",
+      "system": "KELL",
+      "phenotype": "k+",
+      "genotype": "k+/k+ or K+/k+",
+      "variants": ["c.385T (wild-type)"],
+      "description": "KELL system - k antigen"
+    }
+  },
+  "DUFFY": {
+    "FYA": {
+      "allele_name": "Fy(a+)",
+      "gene": "ACKR1",
+      "system": "DUFFY",
+      "phenotype": "Fy(a+)",
+      "genotype": "Fy(a+)/Fy(a+) or Fy(a+)/Fy(b+)",
+      "variants": ["c.265G (wild-type)"],
+      "description": "Duffy system - Fy(a) antigen"
+    },
+    "FYB": {
+      "allele_name": "Fy(b+)",
+      "gene": "ACKR1",
+      "system": "DUFFY",
+      "phenotype": "Fy(b+)",
+      "genotype": "Fy(b+)/Fy(b+) or Fy(a+)/Fy(b+)",
+      "variants": ["c.265A (alternative)"],
+      "description": "Duffy system - Fy(b) antigen"
+    }
+  },
+  "KIDD": {
+    "JKA": {
+      "allele_name": "Jk(a+)",
+      "gene": "SLC14A1",
+      "system": "KIDD",
+      "phenotype": "Jk(a+)",
+      "genotype": "Jk(a+)/Jk(a+) or Jk(a+)/Jk(b+)",
+      "variants": ["c.838A (wild-type)"],
+      "description": "KIDD system - Jk(a) antigen"
+    },
+    "JKB": {
+      "allele_name": "Jk(b+)",
+      "gene": "SLC14A1",
+      "system": "KIDD",
+      "phenotype": "Jk(b+)",
+      "genotype": "Jk(b+)/Jk(b+) or Jk(a+)/Jk(b+)",
+      "variants": ["c.838G (alternative)"],
+      "description": "KIDD system - Jk(b) antigen"
+    }
+  },
+  "HE": {
+    "HER": {
+      "allele_name": "He+",
+      "gene": "RHAG",
+      "system": "HE",
+      "phenotype": "He+",
+      "genotype": "He+/He+",
+      "variants": ["c.697C>T (p.Ser233Phe)"],
+      "description": "HE system - Herhanzer antigen"
+    }
+  }
+}
