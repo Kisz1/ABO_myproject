@@ -357,45 +357,57 @@ def display_detailed_alignment_table(aligned_query, aligned_reference, variants=
 
 
 def process_ab1_files(fwd_ab1_files, exons_ref, threshold_ratio=0.3):
+    """
+    Process AB1 files for RHD analysis.
 
-    mapping_service = fasta_utils.FASTAAlignmentService()
-    traces = None
-    if len(fwd_ab1_files) > 1:
-        for i in fwd_ab1_files:
-            ab1_service = ab1_utils.AB1Analyzer()
-            trace = ab1_service.read_ab1_trace(i)
-            trace = ab1_service.merge_overlap(
-                traces, trace) if traces else trace
-            traces = trace
+    For RHD analysis with multiple amplicons:
+    - Process EACH file separately (don't merge)
+    - Return list of individual traces
+    - Voting system uses all amplicons to determine RhD+/RhD-
+    """
+    ab1_service = ab1_utils.AB1Analyzer()
+    results = []
+    all_hets = []
 
-    else:
-        ab1_service = ab1_utils.AB1Analyzer()
-        traces = ab1_service.read_ab1_trace(fwd_ab1_files[0])
+    # Process each AB1 file separately for multi-amplicon analysis
+    for ab1_file in fwd_ab1_files:
+        try:
+            trace = ab1_service.read_ab1_trace(ab1_file)
+            if not trace:
+                continue
 
-    if traces:
-        merged_reverse = ab1_service.reverse_chromatogram(traces)
-        merged_norm = ab1_service.normalize_trace_per_channel(merged_reverse)
-        raw_hets = ab1_service.detect_hetero(merged_reverse, ratio=threshold_ratio)
-        hets = []
-        for position, top_bases in raw_hets:
-            major_base, major_signal = top_bases[0]
-            minor_base, minor_signal = top_bases[1]
-            ratio = minor_signal / (major_signal + 1e-6)
-            hets.append({
-                "position": position,
-                "ref_base": major_base,
-                "alt_base": minor_base,
-                "ratio": ratio,
-                "major_signal": major_signal,
-                "minor_signal": minor_signal,
-                "top_bases": top_bases
-            })
+            # For single file or each file in batch: reverse chromatogram
+            reversed_trace = ab1_service.reverse_chromatogram(trace)
+            normalized_trace = ab1_service.normalize_trace_per_channel(reversed_trace)
 
-        # For AB1 files: Return the full traces as-is for RHD analysis
-        # (AB1 files are typically RHD sequences, not ABO exon-specific)
-        # We'll extract the sequence for RHD variant analysis later
-        results = [merged_reverse]  # Wrap in list to maintain consistency
-        return results, hets
+            # Detect heterozygotes in this file
+            raw_hets = ab1_service.detect_hetero(reversed_trace, ratio=threshold_ratio)
+            hets = []
+            for position, top_bases in raw_hets:
+                major_base, major_signal = top_bases[0]
+                minor_base, minor_signal = top_bases[1]
+                ratio = minor_signal / (major_signal + 1e-6)
+                hets.append({
+                    "position": position,
+                    "ref_base": major_base,
+                    "alt_base": minor_base,
+                    "ratio": ratio,
+                    "major_signal": major_signal,
+                    "minor_signal": minor_signal,
+                    "top_bases": top_bases
+                })
+
+            all_hets.extend(hets)
+
+            # Store trace with filename for RHD analysis identification
+            reversed_trace['filename'] = ab1_file.name
+            results.append(reversed_trace)
+
+        except Exception as e:
+            continue
+
+    if results:
+        return results, all_hets if all_hets else None
 
     return None, None
 
@@ -1265,8 +1277,8 @@ if analyze_button:
                      len(hets) if hets else 0)
             if fasta_files and not fwd_ab1:
                 st.info("FASTA results are in the **Exon-based SNP** and **Allele Prediction** tabs.")
-            if processed_AB1:
-                hetero_sites_plot = [(h[0], dict(h[1])) for h in hets] if hets else None
+            if processed_AB1 and 'exon' in processed_AB1[0]:
+                hetero_sites_plot = [(h['position'], h) for h in hets] if hets else None
                 for i in processed_AB1:  # type: ignore
                     x = i['exon']
                     cds_start, cds_end = get_cds(x)
@@ -1275,14 +1287,16 @@ if analyze_button:
                     st.plotly_chart(fig, use_container_width=True)
             elif not fwd_ab1:
                 st.info("Upload an AB1 file to view the chromatogram.")
+            elif processed_AB1:
+                st.info("AB1 file processed - RHD analysis ready in the RHD section below.")
 
             if hets:
                 st.write("### Detected Heterozygous Positions:")
                 het_data = {
-                    "Position": [h[0] for h in hets],
-                    "Top Base": [h[1][0][0] for h in hets],
-                    "Alt Base": [h[1][1][0] if len(h[1]) > 1 else "" for h in hets],
-                    "Ratio": [round(h[1][1][1] / (h[1][0][1] + 1e-6), 2) if len(h[1]) > 1 else 0 for h in hets]
+                    "Position": [h['position'] for h in hets],
+                    "Top Base": [h['ref_base'] for h in hets],
+                    "Alt Base": [h['alt_base'] for h in hets],
+                    "Ratio": [round(h['ratio'], 2) for h in hets]
                 }
                 het_df = pd.DataFrame(het_data)
                 st.table(het_df)
@@ -1502,6 +1516,89 @@ if analyze_button:
                          msg = f"Consistent with {len(all_alleles)} alleles (Total) - {len(excluded)} (Excluded) = {len(all_alleles)-len(excluded)} Candidates."
                          st.write(msg)
                      st.write("---")
+
+        # === RHD ANALYSIS SECTION ===
+        if processed_AB1:
+            st.markdown("---")
+            st.header("🩸 RHD Analysis Results")
+
+            # Extract sequences from AB1 traces for RHD analysis
+            # Each trace is a separate amplicon for voting
+            rhd_sequences = []
+            for i, trace in enumerate(processed_AB1):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        # Use filename from trace if available, otherwise from file list
+                        filename = trace.get('filename', '')
+                        if not filename and i < len(fwd_ab1):
+                            filename = fwd_ab1[i].name
+                        if not filename:
+                            filename = f"Amplicon_{i+1}"
+                        rhd_sequences.append((filename, seq))
+
+            if rhd_sequences:
+                # Use multi-amplicon voting system
+                analyzer = RHDAnalyzer()
+                voting_result = analyzer.analyze_multiple_amplicons(rhd_sequences)
+
+                st.subheader(f"Multi-Amplicon Analysis ({voting_result['total_amplicons']} amplicon(s))")
+
+                # Display voting table
+                st.write("### Individual Amplicon Results:")
+
+                table_data = []
+                for result in voting_result['amplicon_results']:
+                    table_data.append({
+                        'File': result['name'],
+                        'Length (bp)': result['length'],
+                        'Region': result['region'],
+                        'Identity (%)': f"{result['identity']:.1f}%",
+                        'Variants': result['variants'],
+                        'Vote': result['vote'],
+                    })
+
+                df_results = pd.DataFrame(table_data)
+                st.dataframe(df_results, use_container_width=True, hide_index=True)
+
+                # Display voting summary
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("RhD+ Votes", voting_result['votes']['RhD+'])
+                with col2:
+                    st.metric("RhD- Votes", voting_result['votes']['RhD-'])
+                with col3:
+                    st.metric("Inconclusive", voting_result['votes']['Inconclusive'])
+                with col4:
+                    st.metric("Confidence", voting_result['confidence'])
+
+                # Final verdict
+                st.markdown("---")
+                verdict = voting_result['final_verdict']
+                confidence = voting_result['confidence']
+
+                if 'RhD+' in verdict:
+                    st.success(f"### ✅ Final Result: {verdict}")
+                elif 'RhD-' in verdict:
+                    st.warning(f"### ⚠️ Final Result: {verdict}")
+                else:
+                    st.info(f"### ℹ️ Final Result: {verdict}")
+
+                st.write(f"**Confidence Level:** {confidence}")
+                st.write(f"**Reasoning:** {voting_result['details']}")
+
+                # Detailed explanations for each amplicon
+                with st.expander("📋 Detailed Amplicon Analysis"):
+                    for result in voting_result['amplicon_results']:
+                        with st.expander(f"{result['name']} - {result['region']} ({result['length']}bp)"):
+                            st.write(f"**Region:** {result['region']}")
+                            st.write(f"**Length:** {result['length']} bp")
+                            st.write(f"**Identity:** {result['identity']:.1f}%")
+                            st.write(f"**Variants:** {result['variants']}")
+                            st.write(f"**Vote:** {result['vote']}")
+                            st.write(f"**Reason:** {result['reason']}")
+            else:
+                st.info("AB1 files processed but no valid sequences found for RHD analysis.")
 
 
 else:
