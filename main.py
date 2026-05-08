@@ -10,7 +10,7 @@ import io
 import utils.FASTA_analyzer as fasta_utils
 import utils.ab1_analyzer as ab1_utils
 import utils.abo_identifier as abo_utils
-from utils.rhd_analyzer import RHDAnalyzer, RHD1_REFERENCE, RHD456_REFERENCE
+from utils.rhd_analyzer import RHDAnalyzer
 from utils.isbt_handler import ISBTDataHandler
 from utils.bloodgroup import get_system, get_available_system_keys
 
@@ -560,7 +560,7 @@ def analyze_rhd_multifactor(ab1_traces):
         result = {
             'amplicon_index':           i,
             'query_length':             r['query_length'],
-            'reference_length':         len(RHD1_REFERENCE) if region == "RHD1" else len(RHD456_REFERENCE),
+            'reference_length':         951 if region == "RHD1" else 3336,
             'matched_region':           region,
             'reference_description':    f"{region}_ref (WHO standard)",
             'matched_identity':         round(identity, 1),
