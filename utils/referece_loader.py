@@ -31,8 +31,8 @@ class ReferenceLoader:
         """Load a graph from a GML file."""
         try:
             G = nx.read_gml(graph_path)
-            print(f"✅ Loaded graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
+            print(f"[OK] Loaded graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
             return G
         except Exception as e:
-            print(f"❌ Error loading graph: {e}")
+            print(f"[ERROR] Error loading graph: {e}")
             return None 

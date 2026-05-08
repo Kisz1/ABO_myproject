@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"bloodgroup\\\\|get_system\\\\|get_available_system_keys\")",
+      "Bash(Get-ChildItem C:\\\\Users\\\\ExPertComputer\\\\Desktop\\\\ABO_streamlit_version-main *)",
+      "Bash(python -m py_compile main.py)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix: restore correct ABO analysis logic from original version *)",
+      "Bash(python -c ' *)",
+      "Bash(streamlit run *)",
+      "Bash(timeout 10 python -m streamlit run main.py)",
+      "Bash(git commit -m 'fix: resolve import and reference errors for RHD analysis compatibility *)",
+      "Bash(python test_abo_analysis.py)",
+      "Bash(python test_allele_identification.py)",
+      "Bash(python test_rhd_analysis.py)",
+      "PowerShell(tail *)",
+      "Bash(python utils/rhd_analyzer.py)",
+      "Bash(python -m py_compile utils/rhd_analyzer.py)",
+      "Bash(python test_rhd_complete.py)",
+      "Bash(python test_rhd_phenotype.py)"
+    ]
+  }
+}
