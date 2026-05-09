@@ -144,6 +144,33 @@ DIAGNOSTIC_SNP_POSITIONS = {
         'alleles': ['RHD*01W.2'],
         'significance': 'Weak D type 2 - Thr342Pro mutation',
         'reference': 'ISBT, literature verified'
+    },
+    'c.1154G>C': {  # VERIFIED - Weak D type 3
+        'exon': 8,
+        'cDNA_position': 1154,
+        'ref_base': 'G',
+        'alt_base': 'C',
+        'alleles': ['RHD*01W.3'],
+        'significance': 'Weak D type 3 - Ser385Thr mutation',
+        'reference': 'ISBT 004 v6.4'
+    },
+    'c.602C>G': {  # Partial D type IVa marker
+        'exon': 4,
+        'cDNA_position': 602,
+        'ref_base': 'C',
+        'alt_base': 'G',
+        'alleles': ['RHD*DIVa'],
+        'significance': 'Partial D type IVa',
+        'reference': 'ISBT 004 v6.4 / BGMUT'
+    },
+    'c.667T>G': {  # Partial D type VI marker
+        'exon': 5,
+        'cDNA_position': 667,
+        'ref_base': 'T',
+        'alt_base': 'G',
+        'alleles': ['RHD*DVI'],
+        'significance': 'Partial D type VI - alloimmunization risk',
+        'reference': 'ISBT 004 v6.4 / BGMUT'
     }
 }
 
@@ -209,65 +236,184 @@ class RHDAnalyzer:
             # Both similar: default to RHD456 for long ambiguous sequences
             return 'RHD456'
 
-    def determine_rhd_phenotype_snp_based(self, identity, diagnostic_snps):
+    def _detect_rhdpsi(self, query_seq, variants):
         """
-        Determine RhD phenotype using ISBT-informed classification.
+        RHDψ (pseudogene) detection per Singleton et al. 2000 (Blood 95:12)
+        and Chiu et al. 2001. MUST run before identity-based calling.
 
-        This implementation checks 3 VERIFIED diagnostic SNPs:
-        - c.1227G>A (Weak D type 4 / DEL marker - East Asia)
-        - c.809T>G (Weak D type 1)
-        - c.1025T>C (Weak D type 2)
-
-        For complete ISBT allele classification (48+ alleles), consult:
-        https://blooddatabase.isbtweb.org/
-
-        Returns: (phenotype_status, allele_name, reason)
+        Markers:
+          M1 - 37bp duplication in intron 3 (pathognomonic)
+          M2 - W269X stop codon (807T>G); detected as TGA where TGG is normal
+          M3 - large insertion (>=30bp) seen in alignment, supports M1
         """
+        PSI_37BP   = "CATAAATATGTGTGCTAGTCCTGTTAGAC"
+        PSI_STOP   = "CCTTTGGGGGTGA"   # W269X: TGA stop codon
+        NORMAL_TRP = "CCTTTGGGGGTGG"   # W269:  TGG normal tryptophan
 
-        detected_mutations = list(diagnostic_snps.keys()) if diagnostic_snps else []
+        q = (query_seq or "").upper()
+        q_rc = str(Seq(q).reverse_complement()) if q else ""
 
-        # ===== ISBT ALLELE IDENTIFICATION =====
+        m1 = (PSI_37BP in q) or (PSI_37BP in q_rc)
+        m2 = ((PSI_STOP in q or PSI_STOP in q_rc)
+              and (NORMAL_TRP not in q and NORMAL_TRP not in q_rc))
+        m3 = any(
+            isinstance(v, dict)
+            and v.get('type') == 'insertion'
+            and v.get('length', 0) >= 30
+            for v in (variants or [])
+        )
 
-        # 1. c.1227G>A - Weak D type 4 / DEL marker (VERIFIED, ISBT)
-        if 'c.1227G>A' in detected_mutations:
+        # M1 is the pathognomonic marker. M3 (large indel from alignment) is
+        # only supporting evidence - on its own it fires for any garbage
+        # sequence with bad alignment, so we require M1 for any PSI call.
+        if m1 and m2:
+            return {
+                'is_rhdpsi':   True,
+                'confidence':  'HIGH',
+                'allele':      'RHD*PSI',
+                'mechanism':   '37bp intron 3 insertion + W269X stop codon (807T>G)',
+                'markers':     {'37bp_insertion': True, 'W269X_stop': True, 'large_indel': m3}
+            }
+        if m1:
+            return {
+                'is_rhdpsi':   True,
+                'confidence':  'MEDIUM',
+                'allele':      'RHD*PSI (probable)',
+                'mechanism':   '37bp insertion present; W269X stop codon not confirmed',
+                'markers':     {'37bp_insertion': True, 'W269X_stop': False, 'large_indel': m3}
+            }
+        return {'is_rhdpsi': False}
+
+    def determine_rhd_phenotype_snp_based(self, identity, diagnostic_snps,
+                                          query_seq="", variants=None):
+        """
+        ISBT priority-ordered decision tree:
+          P1: RHDψ (pseudogene)        — ALWAYS first
+          P2: Complete RHD deletion    — identity < 60%
+          P3: Weak D / Partial D / DEL — ISBT SNP-based
+          P4: Identity-based fallback  — only if no ISBT marker matched
+
+        Returns a dict with phenotype, allele, reason, and (when relevant)
+        mechanism/confidence/serology/note. The analyze() method unpacks it.
+        """
+        detected = list(diagnostic_snps.keys()) if diagnostic_snps else []
+
+        # ── PRIORITY 1: RHDψ (pseudogene) ────────────────────────────────
+        psi = self._detect_rhdpsi(query_seq, variants)
+        if psi['is_rhdpsi']:
+            return {
+                'phenotype':   'RhD- (D negative)',
+                'allele':      psi['allele'],
+                'reason':      f"RHDψ pseudogene detected ({psi['confidence']} confidence). "
+                               f"Gene is present but non-functional ({psi['mechanism']}).",
+                'mechanism':   psi['mechanism'],
+                'confidence':  psi['confidence'],
+                'serology':    'Confirm with anti-D IAT',
+                'note':        'African / Southeast-Asian RhD- type. Gene present but non-functional.'
+            }
+
+        # ── PRIORITY 2: Complete RHD gene deletion ───────────────────────
+        if identity < 60.0:
+            return {
+                'phenotype':   'RhD- (D negative)',
+                'allele':      'RHD*01N.01',
+                'reason':      f'Identity {identity:.1f}% (<60%) - complete RHD gene deletion (European RhD- type)',
+                'mechanism':   'Complete RHD gene deletion (Rhesus box)',
+                'confidence':  'HIGH'
+            }
+
+        # ── PRIORITY 3: Weak D / Partial D / DEL alleles ─────────────────
+        if 'c.1227G>A' in detected:
             if identity >= 90.0:
-                return ('RhD+ (Weak D type 4)', 'RHD*01W.4',
-                        f'Identity {identity:.1f}% + c.1227G>A detected - Weak D type 4 / Asia DEL (most common in East Asia)')
+                return {
+                    'phenotype': 'RhD+ (Weak D type 4)',
+                    'allele':    'RHD*01W.4',
+                    'reason':    f'Identity {identity:.1f}% + c.1227G>A - Weak D type 4 (most common in East Asia)',
+                    'note':      'Safe to transfuse as D+; recipient typing varies by lab policy.',
+                    'serology':  'Confirm with weak D testing'
+                }
             else:
-                return ('RhD- (DEL phenotype)', 'RHD*01EL (DEL)',
-                        f'Identity {identity:.1f}% + c.1227G>A - DEL allele (very weak D expression)')
+                return {
+                    'phenotype': 'RhD- (DEL phenotype)',
+                    'allele':    'RHD*01EL.1',
+                    'reason':    f'Identity {identity:.1f}% + c.1227G>A - DEL phenotype (East Asian type)',
+                    'note':      'DEL: serologically D-negative but expresses very weak D antigen.',
+                    'serology':  'Confirm with adsorption-elution test'
+                }
 
-        # 2. c.809T>G - Weak D type 1 (VERIFIED, ISBT)
-        if 'c.809T>G' in detected_mutations and identity >= 90.0:
-            return ('RhD+ (Weak D type 1)', 'RHD*01W.1',
-                    f'Identity {identity:.1f}% + c.809T>G detected - Weak D type 1')
+        if 'c.809T>G' in detected and identity >= 90.0:
+            return {
+                'phenotype': 'RhD+ (Weak D type 1)',
+                'allele':    'RHD*01W.1',
+                'reason':    f'Identity {identity:.1f}% + c.809T>G - Weak D type 1 (p.Val270Gly)',
+                'serology':  'Confirm with weak D testing'
+            }
 
-        # 3. c.1025T>C - Weak D type 2 (VERIFIED, ISBT)
-        if 'c.1025T>C' in detected_mutations and identity >= 90.0:
-            return ('RhD+ (Weak D type 2)', 'RHD*01W.2',
-                    f'Identity {identity:.1f}% + c.1025T>C detected - Weak D type 2')
+        if 'c.1025T>C' in detected and identity >= 90.0:
+            return {
+                'phenotype': 'RhD+ (Weak D type 2)',
+                'allele':    'RHD*01W.2',
+                'reason':    f'Identity {identity:.1f}% + c.1025T>C - Weak D type 2 (p.Leu342Pro)',
+                'serology':  'Confirm with weak D testing'
+            }
 
-        # 4. No diagnostic SNPs + very high identity = Standard D (ISBT*01.01)
-        if identity >= 95.0 and len(detected_mutations) == 0:
-            return ('RhD+ (Standard D)', 'RHD*01.01',
-                    f'Identity {identity:.1f}% - Standard D antigen with no diagnostic SNPs')
+        if 'c.1154G>C' in detected and identity >= 90.0:
+            return {
+                'phenotype': 'RhD+ (Weak D type 3)',
+                'allele':    'RHD*01W.3',
+                'reason':    f'Identity {identity:.1f}% + c.1154G>C - Weak D type 3 (p.Ser385Thr)',
+                'serology':  'Confirm with weak D testing'
+            }
 
-        # 5. High identity but unknown variant
+        if 'c.602C>G' in detected and identity >= 85.0:
+            return {
+                'phenotype': 'RhD+ (Partial D type IVa)',
+                'allele':    'RHD*DIVa',
+                'reason':    f'Identity {identity:.1f}% + c.602C>G - Partial D type IVa',
+                'note':      'Partial D — alloimmunization risk; treat as D- for recipient transfusion.',
+                'serology':  'Expert review + extended phenotyping recommended'
+            }
+
+        if 'c.667T>G' in detected and identity >= 85.0:
+            return {
+                'phenotype': 'RhD+ (Partial D type VI)',
+                'allele':    'RHD*DVI',
+                'reason':    f'Identity {identity:.1f}% + c.667T>G - Partial D type VI',
+                'note':      'Partial D — alloimmunization risk; treat as D- for recipient transfusion.',
+                'serology':  'Expert review + extended phenotyping recommended'
+            }
+
+        # ── PRIORITY 4: Identity-based fallback ──────────────────────────
+        if identity >= 95.0 and len(detected) == 0:
+            return {
+                'phenotype': 'RhD+ (Standard D)',
+                'allele':    'RHD*01.01',
+                'reason':    f'Identity {identity:.1f}% - Standard D antigen, no diagnostic SNPs',
+                'confidence': 'HIGH'
+            }
+
         if identity >= 90.0:
-            return ('RhD+ (RHD variant - unknown type)', 'RHD*variant (UNKNOWN)',
-                    f'Identity {identity:.1f}% - High identity suggests RhD+, but specific ISBT allele unclear. Recommend sequencing.')
+            return {
+                'phenotype': 'RhD+ (variant, unknown type)',
+                'allele':    'RHD*variant (UNKNOWN)',
+                'reason':    f'Identity {identity:.1f}% with unclassified variants',
+                'serology':  'Expert review recommended'
+            }
 
-        # 6. Borderline - cannot classify
         if 85.0 <= identity < 90.0:
-            return ('Inconclusive (borderline)', 'Unknown',
-                    f'Borderline identity {identity:.1f}% (85-90%). Recommend additional amplicons or NGS.')
+            return {
+                'phenotype': 'Inconclusive (borderline)',
+                'allele':    'Unknown',
+                'reason':    f'Borderline identity {identity:.1f}% (85-90%)',
+                'serology':  'Serology confirmation required'
+            }
 
-        # 7. Low identity = RhD-
-        if identity < 85.0:
-            return ('RhD- (D negative)', 'RHD negative (deletion)',
-                    f'Low identity {identity:.1f}% (<85%) - RHD gene not detected or severely altered')
-
-        return ('Inconclusive', 'Unknown', 'Unable to determine RhD status')
+        # identity < 85%
+        return {
+            'phenotype': 'RhD- (D negative)',
+            'allele':    'RHD deletion probable',
+            'reason':    f'Identity {identity:.1f}% (<85%) - RHD gene not detected or severely altered'
+        }
 
     def determine_rhd_phenotype(self, region, query_length, identity, variant_count):
         """
@@ -337,16 +483,18 @@ class RHDAnalyzer:
             result = rhd456_result.copy()
             ref_seq = self.rhd456_ref
 
-        # Extract all variants
+        # Extract all variants (including insertions/deletions for RHDψ check)
         variants = self._extract_variants_simple(query_seq_str, ref_seq)
 
         # Detect diagnostic SNPs (ISBT-defined for RhD subtyping)
         diagnostic_snps = self._detect_diagnostic_snps(query_seq_str, ref_seq)
 
-        # Determine phenotype using ISBT allele nomenclature
-        rhd_status, allele_name, reason = self.determine_rhd_phenotype_snp_based(
+        # ISBT priority decision tree (RHDψ -> deletion -> SNPs -> identity)
+        decision = self.determine_rhd_phenotype_snp_based(
             result['identity'],
-            diagnostic_snps
+            diagnostic_snps,
+            query_seq=query_seq_str,
+            variants=variants,
         )
 
         # Compile final result
@@ -358,9 +506,13 @@ class RHDAnalyzer:
             'strand': result['strand'],
             'query_length': query_length,
             'region': region,
-            'rhd_status': rhd_status,
-            'allele_name': allele_name,
-            'reason': reason,
+            'rhd_status': decision['phenotype'],
+            'allele_name': decision['allele'],
+            'reason': decision['reason'],
+            'mechanism': decision.get('mechanism'),
+            'confidence': decision.get('confidence'),
+            'serology': decision.get('serology'),
+            'note': decision.get('note'),
             'reference_description': f'{region} (ISBT Standard - Allele Nomenclature ISBT 004 v6.4)'
         }
 
@@ -371,7 +523,9 @@ class RHDAnalyzer:
         if strand == 'reverse':
             query_seq = str(Seq(query_seq).reverse_complement())
 
-        alignments = pairwise2.align.localms(ref_seq, query_seq, 2, -1, -0.5, -0.1)
+        # Higher gap penalty (open=-5, extend=-0.5) so real insertions are
+        # preserved instead of being smeared into many small gaps.
+        alignments = pairwise2.align.localms(ref_seq, query_seq, 2, -1, -5, -0.5)
 
         if not alignments:
             return {'identity': 0.0, 'score': 0.0, 'strand': strand}
@@ -442,10 +596,19 @@ class RHDAnalyzer:
 
     def _extract_variants_simple(self, query_seq, ref_seq):
         """
-        Simple variant extraction using pairwise alignment.
-        Returns list of variant descriptions (only true mismatches, not trailing gaps).
+        Variant extraction using pairwise alignment. Returns a list of variant
+        dicts capturing SNPs, insertions, and deletions. Insertions are needed
+        for RHDψ detection (37bp duplication in intron 3).
+
+        Each variant dict has:
+            type:    'SNP' | 'insertion' | 'deletion'
+            position: ref index where variant starts
+            length:  bases inserted/deleted (1 for SNP)
+            ref:     reference base(s) or '-' for insertion
+            alt:     query base(s) or '-' for deletion
+            description: short human-readable string
         """
-        alignments = pairwise2.align.localms(ref_seq, query_seq, 2, -1, -0.5, -0.1)
+        alignments = pairwise2.align.localms(ref_seq, query_seq, 2, -1, -5, -0.5)
 
         if not alignments:
             return []
@@ -456,22 +619,71 @@ class RHDAnalyzer:
         start_in_ref = best_match[3]
 
         variants = []
-        current_ref_idx = start_in_ref
+        ref_idx = start_in_ref
+        i = 0
+        n = len(ref_aligned)
 
-        for i in range(len(ref_aligned)):
+        while i < n:
             ref_b = ref_aligned[i]
             query_b = query_aligned[i]
 
-            if ref_b != "-":
-                current_ref_idx_pos = current_ref_idx
-                current_ref_idx += 1
-            else:
+            # Insertion: gap in reference, bases in query
+            if ref_b == '-' and query_b != '-':
+                j = i
+                inserted = []
+                while j < n and ref_aligned[j] == '-' and query_aligned[j] != '-':
+                    inserted.append(query_aligned[j])
+                    j += 1
+                ins_seq = ''.join(inserted)
+                variants.append({
+                    'type': 'insertion',
+                    'position': ref_idx,
+                    'length': len(ins_seq),
+                    'ref': '-',
+                    'alt': ins_seq,
+                    'description': f'ins{ins_seq}@{ref_idx}'
+                })
+                i = j
                 continue
 
-            # Only count mismatches where both ref and query have bases
-            if query_b != "-" and ref_b != query_b:
-                # SNP
-                variants.append(f"{ref_b}>{query_b}@{current_ref_idx_pos}")
+            # Deletion: gap in query, bases in reference
+            if query_b == '-' and ref_b != '-':
+                j = i
+                deleted = []
+                while j < n and query_aligned[j] == '-' and ref_aligned[j] != '-':
+                    deleted.append(ref_aligned[j])
+                    j += 1
+                del_seq = ''.join(deleted)
+                variants.append({
+                    'type': 'deletion',
+                    'position': ref_idx,
+                    'length': len(del_seq),
+                    'ref': del_seq,
+                    'alt': '-',
+                    'description': f'del{del_seq}@{ref_idx}'
+                })
+                ref_idx += len(del_seq)
+                i = j
+                continue
+
+            # Both gaps (rare) - skip
+            if ref_b == '-' and query_b == '-':
+                i += 1
+                continue
+
+            # SNP: mismatch
+            if ref_b != query_b:
+                variants.append({
+                    'type': 'SNP',
+                    'position': ref_idx,
+                    'length': 1,
+                    'ref': ref_b,
+                    'alt': query_b,
+                    'description': f'{ref_b}>{query_b}@{ref_idx}'
+                })
+
+            ref_idx += 1
+            i += 1
 
         return variants
 
@@ -507,18 +719,20 @@ class RHDAnalyzer:
         for name, seq in sequences_with_names:
             result = self.analyze(seq)
 
-            # Determine vote for this amplicon using SNP-based analysis
+            # Vote follows the priority decision tree result, NOT just identity.
+            # An RHDψ sample has high identity but is RhD-; voting must reflect that.
             identity = result['identity']
             length = result['query_length']
             variant_count = len(result['variants'])
             region = result['region']
+            phenotype = result.get('rhd_status', '')
 
-            # Extract SNPs from rhd_status field
-            diagnostic_snps = {}
-            if 'diagnostic_snps' in result:
-                diagnostic_snps = result['diagnostic_snps']
-
-            vote = self._determine_vote(identity, 0, variant_count, region, diagnostic_snps)
+            if phenotype.startswith('RhD-'):
+                vote = 'RhD-'
+            elif phenotype.startswith('RhD+'):
+                vote = 'RhD+'
+            else:
+                vote = 'Inconclusive'
 
             amplicon_results.append({
                 'name': name,
@@ -526,9 +740,13 @@ class RHDAnalyzer:
                 'region': region,
                 'identity': identity,
                 'variants': variant_count,
-                'rhd_status': result['rhd_status'],
+                'rhd_status': phenotype,
+                'allele': result.get('allele_name'),
                 'vote': vote,
-                'reason': result['reason']
+                'reason': result['reason'],
+                'mechanism': result.get('mechanism'),
+                'serology': result.get('serology'),
+                'note': result.get('note'),
             })
 
             votes[vote] += 1

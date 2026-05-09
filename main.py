@@ -1638,6 +1638,7 @@ if analyze_button:
                         'Region': result['region'],
                         'Identity (%)': f"{result['identity']:.1f}%",
                         'Variants': result['variants'],
+                        'ISBT Allele': result.get('allele') or '-',
                         'Vote': result['vote'],
                     })
 
@@ -1678,8 +1679,16 @@ if analyze_button:
                             st.write(f"**Length:** {result['length']} bp")
                             st.write(f"**Identity:** {result['identity']:.1f}%")
                             st.write(f"**Variants:** {result['variants']}")
+                            st.write(f"**ISBT Allele:** {result.get('allele') or '-'}")
+                            st.write(f"**Phenotype:** {result.get('rhd_status', '-')}")
                             st.write(f"**Vote:** {result['vote']}")
                             st.write(f"**Reason:** {result['reason']}")
+                            if result.get('mechanism'):
+                                st.write(f"**Mechanism:** {result['mechanism']}")
+                            if result.get('serology'):
+                                st.warning(f"**Serology recommendation:** {result['serology']}")
+                            if result.get('note'):
+                                st.info(f"**Note:** {result['note']}")
             else:
                 st.info("AB1 files processed but no valid sequences found for RHD analysis.")
 
