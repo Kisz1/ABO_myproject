@@ -412,6 +412,41 @@ def process_ab1_files(fwd_ab1_files, exons_ref, threshold_ratio=0.3):
     return None, None
 
 
+def process_rhd_fasta_files(rhd_fasta_files):
+    """
+    Process RHD FASTA files for RHD multi-amplicon analysis.
+
+    Reads each FASTA file, extracts the sequence, and packages it as a
+    dict trace ({'seq': ..., 'filename': ...}) so analyze_rhd_multifactor
+    can process it identically to AB1 traces.
+    """
+    if not rhd_fasta_files:
+        return None
+
+    traces = []
+    for fasta_file in rhd_fasta_files:
+        try:
+            content = fasta_file.read()
+            if isinstance(content, bytes):
+                content = content.decode('utf-8')
+            fasta_text = io.StringIO(content)
+            records = list(SeqIO.parse(fasta_text, "fasta"))
+            if not records:
+                continue
+            seq = str(records[0].seq).upper()
+            if len(seq) < 50:
+                continue
+            traces.append({
+                'seq': seq,
+                'filename': fasta_file.name,
+                'source': 'fasta',
+            })
+        except Exception:
+            continue
+
+    return traces if traces else None
+
+
 def process_fasta_file(fasta_file, exon_start=0, exon_end=0):
     # Convert Streamlit uploaded file to text mode for BioPython
 
@@ -812,11 +847,27 @@ st.title("🧬 ABO blood group analysis")
 
 # Upload section
 # with st.sidebar:
-fwd_ab1 = st.sidebar.file_uploader("Upload  AB1 file", type=[
-    "ab1"], accept_multiple_files=True, help="You can upload multiple files for batch processing.")
+st.sidebar.markdown("### 🅰️🅱️ ABO Inputs")
+fwd_ab1 = st.sidebar.file_uploader(
+    "Upload ABO AB1 file",
+    type=["ab1"], accept_multiple_files=True,
+    help="AB1 chromatogram for ABO analysis (chromatogram tab + heterozygote detection).")
 
 fasta_files = st.sidebar.file_uploader(
-    "Upload exon-specific FASTA", type=["fasta", "fa", "fas"], accept_multiple_files=True)
+    "Upload ABO FASTA file",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help="Exon-specific FASTA aligned to ABO references.")
+
+st.sidebar.markdown("### 🩸 RHD Inputs")
+rhd_ab1_files = st.sidebar.file_uploader(
+    "Upload RHD AB1 file",
+    type=["ab1"], accept_multiple_files=True,
+    help="AB1 chromatogram for RHD multi-amplicon analysis.")
+
+rhd_fasta_files = st.sidebar.file_uploader(
+    "Upload RHD FASTA file",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help="RHD FASTA (e.g. RHD1, RHD456). Routed to the RHD analyzer with multi-amplicon voting.")
 exon_start = st.sidebar.number_input(
     "Exon start (optional)", min_value=0, value=0)
 exon_end = st.sidebar.number_input(
@@ -1236,22 +1287,48 @@ Blood Transfusion Science,<br> Faculty of Associated Medical Sciences<br>
         st.error(f"Error loading student data: {e}")
 
 if analyze_button:
-    if not fwd_ab1 and not fasta_files:
+    if not fwd_ab1 and not fasta_files and not rhd_fasta_files and not rhd_ab1_files:
         st.warning("Please upload at least one file before analyzing.")
     else:
         status_container = st.empty()
         status_container.success("Files uploaded successfully! Starting analysis...")
 
+        # ABO AB1 channel -> chromatogram + heterozygote detection
+        processed_AB1, hets = process_ab1_files(
+            fwd_ab1, [], threshold_ratio) if fwd_ab1 else (None, None)
+
+        # Build synthetic FASTA file objects from AB1 basecalled sequences so
+        # they flow through the same variant/allele pipeline as user FASTAs.
+        ab1_derived_fastas = []
+        if processed_AB1:
+            for trace in processed_AB1:
+                seq = trace.get('seq', '')
+                if not seq or len(seq) < 50:
+                    continue
+                fname = trace.get('filename', 'ab1_seq') + ".fasta"
+                fasta_text = f">{fname}\n{seq}\n".encode('utf-8')
+                synth = io.BytesIO(fasta_text)
+                synth.name = fname
+                ab1_derived_fastas.append(synth)
+
+        # Combine user FASTAs and AB1-derived FASTAs for the ABO pipeline
+        abo_inputs_for_fasta = []
+        if fasta_files:
+            abo_inputs_for_fasta.extend(fasta_files)
+        if ab1_derived_fastas:
+            abo_inputs_for_fasta.extend(ab1_derived_fastas)
+
         # --- Robust Processing Logic ---
         robust_summary = []
-        if fasta_files:
+        service = None
+        if abo_inputs_for_fasta:
             service = fasta_utils.FASTAAlignmentService()
-            robust_summary = service.generate_batch_summary(fasta_files)
+            robust_summary = service.generate_batch_summary(abo_inputs_for_fasta)
 
         confirmed_results = [r for r in robust_summary if "Confirmed" in r.get('decision', "")]
 
-        # Build exons_ref from confirmed FASTA results so AB1 exon extraction has coordinates
-        if confirmed_results and fasta_files:
+        # Build exons_ref from confirmed results so AB1 exon labels can map to CDS coords
+        if confirmed_results and service is not None:
             aboRef = service.getABO_ref("exons")
             exons_ref = []
             for r in confirmed_results:
@@ -1266,8 +1343,19 @@ if analyze_button:
                         'cds_end': aboRef[x]['cds_end']
                     })
 
-        processed_AB1, hets = process_ab1_files(
-            fwd_ab1, exons_ref, threshold_ratio) if fwd_ab1 else (None, None)
+        # RHD AB1 channel -> RHD analyzer only (no chromatogram tab)
+        rhd_ab1_traces, _ = process_ab1_files(
+            rhd_ab1_files, [], threshold_ratio) if rhd_ab1_files else (None, None)
+
+        # RHD FASTA channel -> RHD analyzer
+        rhd_fasta_traces = process_rhd_fasta_files(rhd_fasta_files) if rhd_fasta_files else None
+
+        # Combine RHD inputs (channel-based, no filename filtering)
+        rhd_input_traces = []
+        if rhd_ab1_traces:
+            rhd_input_traces.extend(rhd_ab1_traces)
+        if rhd_fasta_traces:
+            rhd_input_traces.extend(rhd_fasta_traces)
 
         status_container.empty()
 
@@ -1277,18 +1365,16 @@ if analyze_button:
                      len(hets) if hets else 0)
             if fasta_files and not fwd_ab1:
                 st.info("FASTA results are in the **Exon-based SNP** and **Allele Prediction** tabs.")
-            if processed_AB1 and 'exon' in processed_AB1[0]:
+            if processed_AB1:
                 hetero_sites_plot = [(h['position'], h) for h in hets] if hets else None
                 for i in processed_AB1:  # type: ignore
-                    x = i['exon']
-                    cds_start, cds_end = get_cds(x)
+                    exon_num = i.get('exon')
+                    cds_start, cds_end = get_cds(exon_num) if exon_num is not None else (None, None)
                     fig = plot_chromatogram_plotly(
                         i, base_width=2, cds_start=cds_start, cds_end=cds_end, hetero_sites=hetero_sites_plot)
                     st.plotly_chart(fig, use_container_width=True)
             elif not fwd_ab1:
-                st.info("Upload an AB1 file to view the chromatogram.")
-            elif processed_AB1:
-                st.info("AB1 file processed - RHD analysis ready in the RHD section below.")
+                st.info("Upload an ABO AB1 file to view the chromatogram.")
 
             if hets:
                 st.write("### Detected Heterozygous Positions:")
@@ -1518,21 +1604,18 @@ if analyze_button:
                      st.write("---")
 
         # === RHD ANALYSIS SECTION ===
-        if processed_AB1:
+        if rhd_input_traces:
             st.markdown("---")
             st.header("🩸 RHD Analysis Results")
 
-            # Extract sequences from AB1 traces for RHD analysis
+            # Extract sequences from AB1 traces and RHD FASTA traces for RHD analysis
             # Each trace is a separate amplicon for voting
             rhd_sequences = []
-            for i, trace in enumerate(processed_AB1):
+            for i, trace in enumerate(rhd_input_traces):
                 if isinstance(trace, dict) and 'seq' in trace:
                     seq = trace.get('seq', '')
                     if seq and len(seq) > 50:
-                        # Use filename from trace if available, otherwise from file list
                         filename = trace.get('filename', '')
-                        if not filename and i < len(fwd_ab1):
-                            filename = fwd_ab1[i].name
                         if not filename:
                             filename = f"Amplicon_{i+1}"
                         rhd_sequences.append((filename, seq))
