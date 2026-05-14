@@ -11,6 +11,7 @@ import utils.FASTA_analyzer as fasta_utils
 import utils.ab1_analyzer as ab1_utils
 import utils.abo_identifier as abo_utils
 from utils.rhd_analyzer import RHDAnalyzer
+from utils.rhce_analyzer import RHCEAnalyzer, RHCEReferenceMissingError
 from utils.isbt_handler import ISBTDataHandler
 from utils.bloodgroup import get_system, get_available_system_keys
 
@@ -409,6 +410,155 @@ def process_ab1_files(fwd_ab1_files, exons_ref, threshold_ratio=0.3):
     if results:
         return results, all_hets if all_hets else None
 
+    return None, None
+
+
+_BASES_TO_IUPAC = {
+    frozenset('AG'): 'R', frozenset('CT'): 'Y',
+    frozenset('CG'): 'S', frozenset('AT'): 'W',
+    frozenset('GT'): 'K', frozenset('AC'): 'M',
+}
+
+
+def quality_trim_and_mask(seq, qual, q_threshold=20, window=10):
+    """Sliding-window end-trim + internal-N-mask.
+
+    Returns (left, right, masked_seq, n_masked) where:
+      - ``seq[left:right]`` is the trimmed slice with internal low-Q bases
+        replaced by 'N' in ``masked_seq``
+      - ``n_masked`` counts the internal N substitutions
+    Returns (0, 0, '', 0) if the read is entirely below threshold.
+    """
+    n = len(seq)
+    if n == 0:
+        return 0, 0, '', 0
+    if len(qual) != n:
+        qual = [q_threshold] * n
+
+    w = min(window, n)
+
+    left = 0
+    while left + w <= n:
+        if all(q >= q_threshold for q in qual[left:left + w]):
+            break
+        left += 1
+    else:
+        return 0, 0, '', 0  # no clean 5' window found
+
+    right = n
+    while right - w >= left:
+        if all(q >= q_threshold for q in qual[right - w:right]):
+            break
+        right -= 1
+    else:
+        return 0, 0, '', 0  # no clean 3' window found
+
+    if right <= left:
+        return 0, 0, '', 0
+
+    trimmed = list(seq[left:right])
+    n_masked = 0
+    for i, q in enumerate(qual[left:right]):
+        if q < q_threshold:
+            trimmed[i] = 'N'
+            n_masked += 1
+
+    return left, right, ''.join(trimmed), n_masked
+
+
+def process_rhd_ab1_files(rhd_ab1_files, q_threshold=20, window=10, het_ratio=0.30):
+    """RHD-only AB1 processor with Phred trimming + signal-based het encoding.
+
+    Diverges from process_ab1_files (used by ABO) in three ways:
+      1. Captures Phred quality scores from the AB1 file.
+      2. Sliding-window end-trims and N-masks low-Q bases before SNP analysis.
+      3. Uses chromatogram signal (detect_hetero) to find heterozygous positions
+         and encodes them as IUPAC codes in the basecalled sequence so the
+         downstream RHDAnalyzer can detect heterozygous diagnostic SNPs.
+
+    Returns (results_list, hets_list_or_None) shaped like process_ab1_files so
+    the existing call site can swap in without other changes.
+    """
+    if not rhd_ab1_files:
+        return None, None
+
+    ab1_service = ab1_utils.AB1Analyzer()
+    results = []
+    all_hets = []
+
+    for ab1_file in rhd_ab1_files:
+        try:
+            trace = ab1_service.read_ab1_trace_with_quality(ab1_file)
+            if not trace:
+                continue
+
+            seq = trace['seq']
+            qual = list(trace.get('quality_scores') or [])
+            n = len(seq)
+            if n == 0:
+                continue
+
+            left, right, masked_str, n_masked = quality_trim_and_mask(
+                seq, qual, q_threshold=q_threshold, window=window)
+            if right <= left:
+                continue  # entirely low-quality read
+            trimmed_seq = list(masked_str)
+
+            # 3. Signal-based het detection on the original (untrimmed) trace.
+            #    Normalize first so detect_hetero's thresholds are meaningful.
+            normalized = ab1_service.normalize_trace_per_channel(trace)
+            raw_hets = ab1_service.detect_hetero(normalized, ratio=het_ratio)
+
+            # 4. Encode hets as IUPAC in the trimmed sequence. detect_hetero
+            #    yields (sample_idx, top_bases) where sample_idx is a peak
+            #    position in PLOC2 sample-space. Map back to base index.
+            pos_array = np.asarray(trace['pos'])
+            n_hets_encoded = 0
+            for sample_idx, top_bases in raw_hets:
+                base_idx_arr = np.where(pos_array == sample_idx)[0]
+                if len(base_idx_arr) == 0:
+                    continue
+                base_idx = int(base_idx_arr[0])
+                trimmed_idx = base_idx - left
+                if trimmed_idx < 0 or trimmed_idx >= len(trimmed_seq):
+                    continue
+                if trimmed_seq[trimmed_idx] == 'N':
+                    continue  # quality wins over signal at masked positions
+                major_base = top_bases[0][0]
+                minor_base = top_bases[1][0]
+                iupac = _BASES_TO_IUPAC.get(frozenset([major_base, minor_base]))
+                if not iupac:
+                    continue
+                trimmed_seq[trimmed_idx] = iupac
+                n_hets_encoded += 1
+                all_hets.append({
+                    'position': base_idx,
+                    'ref_base': major_base,
+                    'alt_base': minor_base,
+                    'ratio': top_bases[1][1] / (top_bases[0][1] + 1e-6),
+                    'iupac': iupac,
+                    'filename': getattr(ab1_file, 'name', 'unknown'),
+                })
+
+            trace['seq'] = ''.join(trimmed_seq)
+            trace['filename'] = getattr(ab1_file, 'name', 'unknown')
+            trace['qc'] = {
+                'q_threshold': q_threshold,
+                'window': window,
+                'trimmed_5p': left,
+                'trimmed_3p': n - right,
+                'masked_internal': n_masked,
+                'het_positions_encoded': n_hets_encoded,
+                'final_length': len(trace['seq']),
+                'original_length': n,
+            }
+            results.append(trace)
+
+        except Exception:
+            continue
+
+    if results:
+        return results, (all_hets if all_hets else None)
     return None, None
 
 
@@ -868,6 +1018,18 @@ rhd_fasta_files = st.sidebar.file_uploader(
     "Upload RHD FASTA file",
     type=["fasta", "fa", "fas"], accept_multiple_files=True,
     help="RHD FASTA (e.g. RHD1, RHD456). Routed to the RHD analyzer with multi-amplicon voting.")
+
+st.sidebar.markdown("### 🩸 RHCE Inputs")
+rhce_ab1_files = st.sidebar.file_uploader(
+    "Upload RHCE AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help="AB1 chromatograms covering RHCE exons 1, 2, 5 (C/c + E/e diagnostic regions).")
+
+rhce_fasta_files = st.sidebar.file_uploader(
+    "Upload RHCE FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help="Multiple FASTA reads recommended for international-standard multi-read consensus voting.")
+
 exon_start = st.sidebar.number_input(
     "Exon start (optional)", min_value=0, value=0)
 exon_end = st.sidebar.number_input(
@@ -892,7 +1054,7 @@ def get_cds(exon_number):
     return None, None
 
 
-def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt_handler, has_fasta, rhd_reference_seq=None):
+def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt_handler, has_fasta, rhd_reference_seq=None, rhce_result=None):
     """
     Generate a comprehensive final blood group summary from all analyzed systems.
 
@@ -902,13 +1064,15 @@ def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt
         hets: Heterozygote data
         isbt_handler: ISBT handler for phenotype suggestions
         has_fasta: bool indicating whether FASTA files were uploaded
+        rhce_result: optional dict from RHCEAnalyzer.analyze() with consensus result
 
     Returns:
         Dictionary with final blood group summary
     """
     summary = {
         'abo': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'message': None},
-        'rhd': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'identity': None, 'query_length': None, 'reference_length': None, 'note': None}
+        'rhd': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'identity': None, 'query_length': None, 'reference_length': None, 'note': None},
+        'rhce': {'status': 'not_analyzed', 'phenotype': None, 'c_e': None, 'big_E': None, 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'partial_markers': [], 'message': None},
     }
 
     # ABO Analysis Summary
@@ -974,6 +1138,23 @@ def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt
             summary['rhd']['status'] = 'error'
             summary['rhd']['phenotype'] = 'Analysis failed'
 
+    # RHCE Analysis Summary - multi-read consensus
+    if rhce_result is not None:
+        if rhce_result.get('phenotype') == 'Indeterminate' or rhce_result.get('reads_callable', 0) == 0:
+            summary['rhce']['status'] = 'indeterminate'
+            summary['rhce']['phenotype'] = 'Indeterminate'
+            summary['rhce']['message'] = rhce_result.get('reason')
+        else:
+            summary['rhce']['status'] = 'analyzed'
+            summary['rhce']['phenotype'] = rhce_result.get('phenotype')
+            summary['rhce']['c_e'] = (rhce_result.get('c_e_call') or {}).get('genotype')
+            summary['rhce']['big_E'] = (rhce_result.get('big_E_call') or {}).get('genotype')
+            summary['rhce']['allele_options'] = rhce_result.get('allele_options', [])
+            summary['rhce']['confidence'] = rhce_result.get('overall_confidence')
+            summary['rhce']['reads_callable'] = rhce_result.get('reads_callable', 0)
+            summary['rhce']['reads_total'] = rhce_result.get('reads_total', 0)
+            summary['rhce']['partial_markers'] = (rhce_result.get('big_E_call') or {}).get('partial_markers', [])
+
     return summary
 
 
@@ -1005,6 +1186,16 @@ def display_final_blood_group_result(summary):
     else:
         result_parts.append("*RHD: Not analyzed*")
 
+    # RHCE result
+    if summary['rhce']['status'] == 'analyzed' and summary['rhce']['phenotype']:
+        conf = summary['rhce'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        result_parts.append(f"**RHCE: {summary['rhce']['phenotype']}{conf_tag}**")
+    elif summary['rhce']['status'] == 'indeterminate':
+        result_parts.append("**RHCE: Indeterminate**")
+    else:
+        result_parts.append("*RHCE: Not analyzed*")
+
     # Display the result
     final_result = " | ".join(result_parts)
 
@@ -1027,7 +1218,7 @@ def display_final_blood_group_result(summary):
 
     # Additional details in expandable section
     with st.expander("📋 Detailed Analysis Results", expanded=False):
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
             st.markdown("### ABO System")
@@ -1070,6 +1261,31 @@ def display_final_blood_group_result(summary):
                     st.warning(summary['rhd']['note'])
             else:
                 st.warning("RHD analysis not performed")
+
+        with col3:
+            st.markdown("### RHCE System")
+            if summary['rhce']['status'] == 'analyzed':
+                st.success(f"Phenotype: {summary['rhce']['phenotype']}")
+                if summary['rhce'].get('c_e') or summary['rhce'].get('big_E'):
+                    st.write(f"**C/c:** {summary['rhce'].get('c_e') or '-'}  |  "
+                             f"**E/e:** {summary['rhce'].get('big_E') or '-'}")
+                if summary['rhce'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['rhce']['confidence']}")
+                if summary['rhce'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['rhce']['reads_callable']} callable / "
+                             f"{summary['rhce']['reads_total']} total")
+                if summary['rhce']['allele_options']:
+                    options = ", ".join(o['isbt'] for o in summary['rhce']['allele_options'])
+                    st.info(f"ISBT haplotype options: {options}")
+                if summary['rhce']['partial_markers']:
+                    sigs = "; ".join(p['significance'] for p in summary['rhce']['partial_markers'])
+                    st.warning(f"Asian partial-E flagged: {sigs}")
+            elif summary['rhce']['status'] == 'indeterminate':
+                st.warning("RHCE indeterminate (no callable reads or primary markers missed)")
+                if summary['rhce'].get('message'):
+                    st.caption(summary['rhce']['message'])
+            else:
+                st.warning("RHCE analysis not performed")
 
 
 # --- Main Panel ---
@@ -1287,7 +1503,8 @@ Blood Transfusion Science,<br> Faculty of Associated Medical Sciences<br>
         st.error(f"Error loading student data: {e}")
 
 if analyze_button:
-    if not fwd_ab1 and not fasta_files and not rhd_fasta_files and not rhd_ab1_files:
+    if (not fwd_ab1 and not fasta_files and not rhd_fasta_files and not rhd_ab1_files
+            and not rhce_ab1_files and not rhce_fasta_files):
         st.warning("Please upload at least one file before analyzing.")
     else:
         status_container = st.empty()
@@ -1343,9 +1560,11 @@ if analyze_button:
                         'cds_end': aboRef[x]['cds_end']
                     })
 
-        # RHD AB1 channel -> RHD analyzer only (no chromatogram tab)
-        rhd_ab1_traces, _ = process_ab1_files(
-            rhd_ab1_files, [], threshold_ratio) if rhd_ab1_files else (None, None)
+        # RHD AB1 channel -> RHD analyzer only (no chromatogram tab).
+        # Uses RHD-specific processor with Phred quality trimming and
+        # signal-based heterozygous IUPAC encoding for diagnostic SNPs.
+        rhd_ab1_traces, _ = process_rhd_ab1_files(
+            rhd_ab1_files, het_ratio=threshold_ratio) if rhd_ab1_files else (None, None)
 
         # RHD FASTA channel -> RHD analyzer
         rhd_fasta_traces = process_rhd_fasta_files(rhd_fasta_files) if rhd_fasta_files else None
@@ -1357,7 +1576,52 @@ if analyze_button:
         if rhd_fasta_traces:
             rhd_input_traces.extend(rhd_fasta_traces)
 
+        # RHCE inputs - reuse the RHD AB1/FASTA processors (same trace shape).
+        rhce_ab1_traces, _ = process_rhd_ab1_files(
+            rhce_ab1_files, het_ratio=threshold_ratio) if rhce_ab1_files else (None, None)
+        rhce_fasta_traces = process_rhd_fasta_files(rhce_fasta_files) if rhce_fasta_files else None
+
+        rhce_input_traces = []
+        if rhce_ab1_traces:
+            rhce_input_traces.extend(rhce_ab1_traces)
+        if rhce_fasta_traces:
+            rhce_input_traces.extend(rhce_fasta_traces)
+
+        # Run RHCE consensus once so both the headline banner and the
+        # detailed RHCE section share the same result. None if no inputs
+        # or if the reference is missing.
+        rhce_result = None
+        rhce_reads_for_summary = []
+        rhce_error_message = None
+        if rhce_input_traces:
+            for i, trace in enumerate(rhce_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"RHCE_read_{i+1}"
+                        rhce_reads_for_summary.append((rid, seq))
+            if rhce_reads_for_summary:
+                try:
+                    rhce_result = RHCEAnalyzer().analyze(rhce_reads_for_summary)
+                except RHCEReferenceMissingError as e:
+                    rhce_error_message = str(e)
+
         status_container.empty()
+
+        # === FINAL BLOOD GROUP RESULT banner (consolidated) ===
+        try:
+            _isbt_handler = ISBTDataHandler()
+            _summary = generate_final_blood_group_summary(
+                robust_summary,
+                processed_AB1,
+                hets,
+                _isbt_handler,
+                has_fasta=bool(fasta_files),
+                rhce_result=rhce_result,
+            )
+            display_final_blood_group_result(_summary)
+        except Exception as banner_exc:
+            st.warning(f"Could not render consolidated summary: {banner_exc}")
 
         with tab1:
             st.subheader("Chromatogram Check for Heterozygotes")
@@ -1611,6 +1875,7 @@ if analyze_button:
             # Extract sequences from AB1 traces and RHD FASTA traces for RHD analysis
             # Each trace is a separate amplicon for voting
             rhd_sequences = []
+            qc_by_name = {}
             for i, trace in enumerate(rhd_input_traces):
                 if isinstance(trace, dict) and 'seq' in trace:
                     seq = trace.get('seq', '')
@@ -1619,11 +1884,20 @@ if analyze_button:
                         if not filename:
                             filename = f"Amplicon_{i+1}"
                         rhd_sequences.append((filename, seq))
+                        if 'qc' in trace:
+                            qc_by_name[filename] = trace['qc']
 
             if rhd_sequences:
                 # Use multi-amplicon voting system
                 analyzer = RHDAnalyzer()
                 voting_result = analyzer.analyze_multiple_amplicons(rhd_sequences)
+
+                # Attach QC metadata (Phred trim / het encoding) by filename so
+                # the UI can show data quality alongside each amplicon's call.
+                for r in voting_result['amplicon_results']:
+                    qc = qc_by_name.get(r['name'])
+                    if qc:
+                        r['qc'] = qc
 
                 st.subheader(f"Multi-Amplicon Analysis ({voting_result['total_amplicons']} amplicon(s))")
 
@@ -1632,6 +1906,17 @@ if analyze_button:
 
                 table_data = []
                 for result in voting_result['amplicon_results']:
+                    qc = result.get('qc') or {}
+                    if qc:
+                        qc_summary = (
+                            f"5':{qc.get('trimmed_5p', 0)} "
+                            f"3':{qc.get('trimmed_3p', 0)} "
+                            f"N:{qc.get('masked_internal', 0)} "
+                            f"het:{qc.get('het_positions_encoded', 0)}"
+                        )
+                    else:
+                        qc_summary = '-'
+                    zyg = result.get('zygosity')
                     table_data.append({
                         'File': result['name'],
                         'Length (bp)': result['length'],
@@ -1639,6 +1924,8 @@ if analyze_button:
                         'Identity (%)': f"{result['identity']:.1f}%",
                         'Variants': result['variants'],
                         'ISBT Allele': result.get('allele') or '-',
+                        'Zygosity': zyg.upper() if zyg else '-',
+                        'QC (trim/mask/het)': qc_summary,
                         'Vote': result['vote'],
                     })
 
@@ -1682,6 +1969,8 @@ if analyze_button:
                             st.write(f"**ISBT Allele:** {result.get('allele') or '-'}")
                             st.write(f"**Phenotype:** {result.get('rhd_status', '-')}")
                             st.write(f"**Vote:** {result['vote']}")
+                            if result.get('zygosity'):
+                                st.write(f"**Zygosity (diagnostic SNP):** {result['zygosity'].upper()}")
                             st.write(f"**Reason:** {result['reason']}")
                             if result.get('mechanism'):
                                 st.write(f"**Mechanism:** {result['mechanism']}")
@@ -1689,8 +1978,135 @@ if analyze_button:
                                 st.warning(f"**Serology recommendation:** {result['serology']}")
                             if result.get('note'):
                                 st.info(f"**Note:** {result['note']}")
+                            qc = result.get('qc')
+                            if qc:
+                                st.write(
+                                    f"**QC (Phred Q≥{qc.get('q_threshold')}):** "
+                                    f"trimmed {qc.get('trimmed_5p', 0)} bp from 5', "
+                                    f"{qc.get('trimmed_3p', 0)} bp from 3'; "
+                                    f"masked {qc.get('masked_internal', 0)} internal low-Q bases as N; "
+                                    f"encoded {qc.get('het_positions_encoded', 0)} heterozygous position(s) as IUPAC; "
+                                    f"final length {qc.get('final_length', 0)} bp "
+                                    f"(original {qc.get('original_length', 0)} bp)."
+                                )
+                            snps = result.get('diagnostic_snps') or {}
+                            if snps:
+                                st.write("**Diagnostic SNPs detected:**")
+                                snp_rows = []
+                                for snp_name, info in snps.items():
+                                    snp_rows.append({
+                                        'SNP': snp_name,
+                                        'cDNA pos': info.get('cDNA_position'),
+                                        'Ref': info.get('reference_base'),
+                                        'Query': info.get('query_base'),
+                                        'Zygosity': (info.get('zygosity') or '-').upper(),
+                                        'Significance': info.get('significance'),
+                                    })
+                                st.dataframe(pd.DataFrame(snp_rows), hide_index=True, use_container_width=True)
             else:
                 st.info("AB1 files processed but no valid sequences found for RHD analysis.")
+
+        # === RHCE ANALYSIS SECTION ===
+        if rhce_input_traces:
+            st.markdown("---")
+            st.header("🩸 RHCE Analysis Results (C/c + E/e)")
+
+            if not rhce_reads_for_summary:
+                st.info("RHCE files processed but no valid sequences found.")
+            elif rhce_error_message is not None:
+                st.error("RHCE reference data is missing.")
+                st.code(rhce_error_message)
+                st.info("See **utils/data/RHCE_REFERENCE_README.md** for download instructions.")
+            else:
+                if rhce_result is not None:
+                    # Headline result
+                    conf = rhce_result['overall_confidence']
+                    pheno = rhce_result['phenotype']
+                    if conf == 'HIGH':
+                        st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                    elif conf == 'MEDIUM':
+                        st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                    elif conf == 'LOW':
+                        st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                    else:
+                        st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                    st.caption(rhce_result['reason'])
+
+                    # Read coverage metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Reads (callable / total)",
+                                  f"{rhce_result['reads_callable']} / {rhce_result['reads_total']}")
+                    with col2:
+                        st.metric("C/c call", rhce_result['c_e_call']['genotype'] or "–")
+                    with col3:
+                        st.metric("E/e call", rhce_result['big_E_call']['genotype'] or "–")
+                    with col4:
+                        st.metric("Overall confidence", conf)
+
+                    # ISBT haplotype interpretation
+                    if rhce_result['allele_options']:
+                        st.markdown("#### Possible ISBT haplotype pairs")
+                        st.caption(
+                            "Sanger genotyping cannot phase haplotypes. "
+                            "For compound heterozygotes both phase options are listed."
+                        )
+                        for opt in rhce_result['allele_options']:
+                            st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`")
+
+                    # Per-SNP consensus table
+                    st.markdown("#### Per-SNP consensus")
+                    snp_rows = []
+                    for snp_name, cons in rhce_result['snp_consensus'].items():
+                        votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                        snp_rows.append({
+                            'SNP': snp_name,
+                            'Consensus': cons['consensus'],
+                            'Call': cons.get('call', '–'),
+                            'Confidence': cons['confidence'],
+                            'Reads covering': cons['reads_covering'],
+                            'Votes': votes_str,
+                            'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                        })
+                    st.dataframe(pd.DataFrame(snp_rows),
+                                 hide_index=True, use_container_width=True)
+
+                    # Partial-E flags
+                    partial = rhce_result['big_E_call'].get('partial_markers') or []
+                    if partial:
+                        st.warning(
+                            "**Asian partial-E variant(s) detected:** "
+                            + "; ".join(f"{p['snp']} ({p['zygosity']}) - {p['significance']}" for p in partial)
+                        )
+
+                    # Per-read drill-down
+                    with st.expander("📋 Per-read details"):
+                        for read in rhce_result['per_read_details']:
+                            st.markdown(f"**{read['read_id']}** — "
+                                        f"strand={read['strand']}, "
+                                        f"identity={read['identity']}%, "
+                                        f"length={read['query_length']} bp, "
+                                        f"callable={read['callable']}")
+                            st.caption(read['reason'])
+                            read_rows = []
+                            for snp_name, call in read['snp_calls'].items():
+                                if call.get('covered'):
+                                    read_rows.append({
+                                        'SNP': snp_name,
+                                        'Call': call.get('call'),
+                                        'Zygosity': call.get('zygosity', '–'),
+                                        'Query base': call.get('query_base', '–'),
+                                    })
+                                else:
+                                    read_rows.append({
+                                        'SNP': snp_name,
+                                        'Call': 'not covered',
+                                        'Zygosity': '–',
+                                        'Query base': '–',
+                                    })
+                            st.dataframe(pd.DataFrame(read_rows),
+                                         hide_index=True, use_container_width=True)
 
 
 else:

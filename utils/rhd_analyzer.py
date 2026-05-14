@@ -6,7 +6,7 @@ For complete allele classification, consult blooddatabase.isbtweb.org
 """
 
 from Bio import SeqIO
-from Bio import pairwise2
+from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
 # WHO STANDARD RHD REFERENCE SEQUENCES
@@ -49,6 +49,15 @@ RHD456_REFERENCE = (
 
 # ISBT Standards - Identity thresholds
 IDENTITY_RHD_POSITIVE = 90.0  # % - minimum identity to confirm RHD gene present
+
+# IUPAC ambiguity decoding for heterozygous-aware SNP detection.
+# Each code maps to the set of possible bases it represents.
+IUPAC_DECODE = {
+    'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'U': 'T',
+    'R': 'AG', 'Y': 'CT', 'S': 'CG', 'W': 'AT', 'K': 'GT', 'M': 'AC',
+    'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG',
+    'N': 'ACGT',
+}
 
 # ISBT RHD Allele Nomenclature (ISBT 004 - Simplified for this implementation)
 # Reference: https://www.isbtweb.org/resource/004rhd.html
@@ -185,6 +194,7 @@ class RHDAnalyzer:
         self.exon_map = []
         self.rhd1_ref = RHD1_REFERENCE
         self.rhd456_ref = RHD456_REFERENCE
+        self._aligner = self._build_aligner()
 
         # Try to load from GenBank if provided
         if gb_path and reference_seq is None:
@@ -298,6 +308,17 @@ class RHDAnalyzer:
         """
         detected = list(diagnostic_snps.keys()) if diagnostic_snps else []
 
+        def _zyg_tag(snp_key):
+            """Return ' (heterozygous)' / ' (homozygous)' suffix for reason text."""
+            if not diagnostic_snps:
+                return ''
+            z = diagnostic_snps.get(snp_key, {}).get('zygosity')
+            if z == 'het':
+                return ' (heterozygous)'
+            if z == 'hom':
+                return ' (homozygous)'
+            return ''
+
         # ── PRIORITY 1: RHDψ (pseudogene) ────────────────────────────────
         psi = self._detect_rhdpsi(query_seq, variants)
         if psi['is_rhdpsi']:
@@ -324,63 +345,76 @@ class RHDAnalyzer:
 
         # ── PRIORITY 3: Weak D / Partial D / DEL alleles ─────────────────
         if 'c.1227G>A' in detected:
+            tag = _zyg_tag('c.1227G>A')
             if identity >= 90.0:
                 return {
                     'phenotype': 'RhD+ (Weak D type 4)',
                     'allele':    'RHD*01W.4',
-                    'reason':    f'Identity {identity:.1f}% + c.1227G>A - Weak D type 4 (most common in East Asia)',
+                    'reason':    f'Identity {identity:.1f}% + c.1227G>A{tag} - Weak D type 4 (most common in East Asia)',
                     'note':      'Safe to transfuse as D+; recipient typing varies by lab policy.',
-                    'serology':  'Confirm with weak D testing'
+                    'serology':  'Confirm with weak D testing',
+                    'zygosity':  diagnostic_snps['c.1227G>A'].get('zygosity'),
                 }
             else:
                 return {
                     'phenotype': 'RhD- (DEL phenotype)',
                     'allele':    'RHD*01EL.1',
-                    'reason':    f'Identity {identity:.1f}% + c.1227G>A - DEL phenotype (East Asian type)',
+                    'reason':    f'Identity {identity:.1f}% + c.1227G>A{tag} - DEL phenotype (East Asian type)',
                     'note':      'DEL: serologically D-negative but expresses very weak D antigen.',
-                    'serology':  'Confirm with adsorption-elution test'
+                    'serology':  'Confirm with adsorption-elution test',
+                    'zygosity':  diagnostic_snps['c.1227G>A'].get('zygosity'),
                 }
 
         if 'c.809T>G' in detected and identity >= 90.0:
+            tag = _zyg_tag('c.809T>G')
             return {
                 'phenotype': 'RhD+ (Weak D type 1)',
                 'allele':    'RHD*01W.1',
-                'reason':    f'Identity {identity:.1f}% + c.809T>G - Weak D type 1 (p.Val270Gly)',
-                'serology':  'Confirm with weak D testing'
+                'reason':    f'Identity {identity:.1f}% + c.809T>G{tag} - Weak D type 1 (p.Val270Gly)',
+                'serology':  'Confirm with weak D testing',
+                'zygosity':  diagnostic_snps['c.809T>G'].get('zygosity'),
             }
 
         if 'c.1025T>C' in detected and identity >= 90.0:
+            tag = _zyg_tag('c.1025T>C')
             return {
                 'phenotype': 'RhD+ (Weak D type 2)',
                 'allele':    'RHD*01W.2',
-                'reason':    f'Identity {identity:.1f}% + c.1025T>C - Weak D type 2 (p.Leu342Pro)',
-                'serology':  'Confirm with weak D testing'
+                'reason':    f'Identity {identity:.1f}% + c.1025T>C{tag} - Weak D type 2 (p.Leu342Pro)',
+                'serology':  'Confirm with weak D testing',
+                'zygosity':  diagnostic_snps['c.1025T>C'].get('zygosity'),
             }
 
         if 'c.1154G>C' in detected and identity >= 90.0:
+            tag = _zyg_tag('c.1154G>C')
             return {
                 'phenotype': 'RhD+ (Weak D type 3)',
                 'allele':    'RHD*01W.3',
-                'reason':    f'Identity {identity:.1f}% + c.1154G>C - Weak D type 3 (p.Ser385Thr)',
-                'serology':  'Confirm with weak D testing'
+                'reason':    f'Identity {identity:.1f}% + c.1154G>C{tag} - Weak D type 3 (p.Ser385Thr)',
+                'serology':  'Confirm with weak D testing',
+                'zygosity':  diagnostic_snps['c.1154G>C'].get('zygosity'),
             }
 
         if 'c.602C>G' in detected and identity >= 85.0:
+            tag = _zyg_tag('c.602C>G')
             return {
                 'phenotype': 'RhD+ (Partial D type IVa)',
                 'allele':    'RHD*DIVa',
-                'reason':    f'Identity {identity:.1f}% + c.602C>G - Partial D type IVa',
+                'reason':    f'Identity {identity:.1f}% + c.602C>G{tag} - Partial D type IVa',
                 'note':      'Partial D — alloimmunization risk; treat as D- for recipient transfusion.',
-                'serology':  'Expert review + extended phenotyping recommended'
+                'serology':  'Expert review + extended phenotyping recommended',
+                'zygosity':  diagnostic_snps['c.602C>G'].get('zygosity'),
             }
 
         if 'c.667T>G' in detected and identity >= 85.0:
+            tag = _zyg_tag('c.667T>G')
             return {
                 'phenotype': 'RhD+ (Partial D type VI)',
                 'allele':    'RHD*DVI',
-                'reason':    f'Identity {identity:.1f}% + c.667T>G - Partial D type VI',
+                'reason':    f'Identity {identity:.1f}% + c.667T>G{tag} - Partial D type VI',
                 'note':      'Partial D — alloimmunization risk; treat as D- for recipient transfusion.',
-                'serology':  'Expert review + extended phenotyping recommended'
+                'serology':  'Expert review + extended phenotyping recommended',
+                'zygosity':  diagnostic_snps['c.667T>G'].get('zygosity'),
             }
 
         # ── PRIORITY 4: Identity-based fallback ──────────────────────────
@@ -513,24 +547,38 @@ class RHDAnalyzer:
             'confidence': decision.get('confidence'),
             'serology': decision.get('serology'),
             'note': decision.get('note'),
+            'zygosity': decision.get('zygosity'),
             'reference_description': f'{region} (ISBT Standard - Allele Nomenclature ISBT 004 v6.4)'
         }
 
         return final_result
+
+    @staticmethod
+    def _build_aligner():
+        """Local aligner matching the previous pairwise2 localms(2,-1,-5,-0.5) setup.
+
+        Higher gap penalty (open=-5, extend=-0.5) so real insertions are
+        preserved instead of being smeared into many small gaps.
+        """
+        aligner = PairwiseAligner()
+        aligner.mode = 'local'
+        aligner.match_score = 2
+        aligner.mismatch_score = -1
+        aligner.open_gap_score = -5
+        aligner.extend_gap_score = -0.5
+        return aligner
 
     def _analyze_against_reference(self, query_seq, ref_seq, strand='forward'):
         """Analyze query against a specific reference in a specific strand."""
         if strand == 'reverse':
             query_seq = str(Seq(query_seq).reverse_complement())
 
-        # Higher gap penalty (open=-5, extend=-0.5) so real insertions are
-        # preserved instead of being smeared into many small gaps.
-        alignments = pairwise2.align.localms(ref_seq, query_seq, 2, -1, -5, -0.5)
-
-        if not alignments:
+        try:
+            alignments = self._aligner.align(ref_seq, query_seq)
+            best_match = alignments[0]
+        except (ValueError, IndexError, OverflowError):
             return {'identity': 0.0, 'score': 0.0, 'strand': strand}
 
-        best_match = alignments[0]
         identity = self._compute_alignment_identity(best_match)
 
         return {
@@ -542,8 +590,8 @@ class RHDAnalyzer:
 
     def _compute_alignment_identity(self, alignment):
         """Compute identity % only for aligned bases (ignoring gaps)."""
-        ref_aligned = alignment[0]
-        query_aligned = alignment[1]
+        ref_aligned = str(alignment[0])
+        query_aligned = str(alignment[1])
         matches = 0
         aligned_positions = 0
 
@@ -562,35 +610,49 @@ class RHDAnalyzer:
     def _detect_diagnostic_snps(self, query_seq, ref_seq):
         """
         Detect ISBT-verified diagnostic SNPs in the query sequence.
-        Only checks SNPs that are confirmed in ISBT allele database.
 
-        Returns: dict of detected SNPs {snp_name: {details}}
+        IUPAC-aware: heterozygous calls encoded as ambiguity codes (e.g. 'R' for
+        A/G) are detected and tagged with zygosity='het'. 'N' is treated as a
+        no-call and skipped.
         """
         detected_snps = {}
         query_seq_str = str(query_seq).upper()
         ref_seq_str = str(ref_seq).upper()
 
-        # Check only VERIFIED SNP positions from DIAGNOSTIC_SNP_POSITIONS
         for snp_name, snp_info in DIAGNOSTIC_SNP_POSITIONS.items():
             pos = snp_info['cDNA_position']
+            if not (pos - 1 < len(ref_seq_str) and pos - 1 < len(query_seq_str)):
+                continue
 
-            # Position-based search using cDNA positions
-            # Note: This assumes the reference sequence is in the standard cDNA frame
-            if pos - 1 < len(ref_seq_str) and pos - 1 < len(query_seq_str):
-                ref_base = ref_seq_str[pos - 1]  # cDNA position is 1-indexed
-                query_base = query_seq_str[pos - 1]
+            ref_at_pos = ref_seq_str[pos - 1]
+            query_base = query_seq_str[pos - 1]
 
-                # Check if query has the alternative base (SNP is present)
-                if query_base == snp_info['alt_base'] and ref_base == snp_info['ref_base']:
-                    detected_snps[snp_name] = {
-                        'exon': snp_info['exon'],
-                        'cDNA_position': pos,
-                        'reference_base': snp_info['ref_base'],
-                        'query_base': query_base,
-                        'alleles': snp_info['alleles'],
-                        'significance': snp_info['significance'],
-                        'reference': snp_info['reference']
-                    }
+            if ref_at_pos != snp_info['ref_base']:
+                continue
+            if query_base == 'N' or query_base == '-':
+                continue
+
+            decoded = IUPAC_DECODE.get(query_base, query_base)
+            ref_b = snp_info['ref_base']
+            alt_b = snp_info['alt_base']
+
+            if alt_b in decoded and ref_b in decoded and len(decoded) == 2:
+                zygosity = 'het'
+            elif decoded == alt_b:
+                zygosity = 'hom'
+            else:
+                continue
+
+            detected_snps[snp_name] = {
+                'exon': snp_info['exon'],
+                'cDNA_position': pos,
+                'reference_base': ref_b,
+                'query_base': query_base,
+                'zygosity': zygosity,
+                'alleles': snp_info['alleles'],
+                'significance': snp_info['significance'],
+                'reference': snp_info['reference'],
+            }
 
         return detected_snps
 
@@ -608,15 +670,21 @@ class RHDAnalyzer:
             alt:     query base(s) or '-' for deletion
             description: short human-readable string
         """
-        alignments = pairwise2.align.localms(ref_seq, query_seq, 2, -1, -5, -0.5)
-
-        if not alignments:
+        try:
+            alignments = self._aligner.align(ref_seq, query_seq)
+            best_match = alignments[0]
+        except (ValueError, IndexError, OverflowError):
             return []
 
-        best_match = alignments[0]
-        ref_aligned = best_match[0]
-        query_aligned = best_match[1]
-        start_in_ref = best_match[3]
+        ref_aligned = str(best_match[0])
+        query_aligned = str(best_match[1])
+        # PairwiseAligner local mode returns aligned strings covering only the
+        # locally-aligned region; coordinates[0][0] is the start position on
+        # the reference (equivalent to pairwise2 best_match[3]).
+        try:
+            start_in_ref = int(best_match.coordinates[0][0])
+        except (AttributeError, IndexError, TypeError):
+            start_in_ref = 0
 
         variants = []
         ref_idx = start_in_ref
@@ -747,6 +815,8 @@ class RHDAnalyzer:
                 'mechanism': result.get('mechanism'),
                 'serology': result.get('serology'),
                 'note': result.get('note'),
+                'zygosity': result.get('zygosity'),
+                'diagnostic_snps': result.get('diagnostic_snps', {}),
             })
 
             votes[vote] += 1

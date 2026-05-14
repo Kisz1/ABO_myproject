@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional
 from utils.FASTA_analyzer import FASTAAlignmentService
 from utils.abo_identifier import ABOIdentifier
 from utils.rhd_analyzer import RHDAnalyzer
+from utils.rhce_analyzer import RHCEAnalyzer
 
 
 @dataclass
@@ -42,6 +43,12 @@ def analyze_rhd(analyzer: Any, query_sequence: str) -> Any:
     return analyzer.analyze(query_sequence)
 
 
+def analyze_rhce(analyzer: Any, query_sequence) -> Any:
+    """RHCE accepts a single sequence string OR a list of (id, seq) reads
+    for multi-read consensus voting."""
+    return analyzer.analyze(query_sequence)
+
+
 # Register supported systems here.
 # Future systems can be added by adding a new BloodGroupSystemConfig entry.
 register_system(
@@ -66,5 +73,17 @@ register_system(
         accepts_multiple_files=False,
         analyzer_factory=lambda: RHDAnalyzer(),
         analyze_method=analyze_rhd,
+    )
+)
+
+register_system(
+    BloodGroupSystemConfig(
+        key="RHCE",
+        display_name="RHCE",
+        description="RHCE (C/c and E/e) multi-read consensus genotyping with ISBT haplotype mapping.",
+        upload_types=["fasta", "fa", "ab1"],
+        accepts_multiple_files=True,
+        analyzer_factory=lambda: RHCEAnalyzer(),
+        analyze_method=analyze_rhce,
     )
 )

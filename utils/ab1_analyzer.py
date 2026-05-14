@@ -107,6 +107,43 @@ class AB1Analyzer:
             "seq": seq
         }
 
+    def read_ab1_trace_with_quality(self, ab1_file):
+        """Read raw AB1 trace plus per-base Phred quality scores.
+
+        RHD-only path. No orientation flipping — RHDAnalyzer handles strand
+        selection internally via bidirectional alignment. Returns the raw
+        trace exactly as the basecaller wrote it, paired with quality scores
+        aligned 1:1 to ``seq``.
+        """
+        rec = SeqIO.read(ab1_file, "abi")
+        raw = rec.annotations["abif_raw"]
+        seq = str(rec.seq)
+        qual = list(rec.letter_annotations.get("phred_quality", [0] * len(seq)))
+
+        fwo = raw.get("FWO_", b"ACGT").decode("ascii")
+        data_keys = [9, 10, 11, 12]
+
+        traces = {b: None for b in "ACGT"}
+        for base, k in zip(fwo, data_keys):
+            arr = np.array(raw[f"DATA{k}"], dtype=np.int32)
+            traces[base] = arr  # type: ignore
+
+        for b in "ACGT":
+            if traces[b] is None:
+                traces[b] = np.zeros_like(traces[fwo[0]])  # type: ignore
+
+        pos = np.array(raw["PLOC2"], dtype=np.int32)
+
+        return {
+            "A": traces["A"],
+            "C": traces["C"],
+            "G": traces["G"],
+            "T": traces["T"],
+            "pos": pos,
+            "seq": seq,
+            "quality_scores": qual,
+        }
+
     def reverse_chromatogram(self, trace_data):
         """Reverse-complement a merged chromatogram trace."""
         if not trace_data or trace_data["A"] is None:
