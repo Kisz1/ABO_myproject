@@ -1,0 +1,495 @@
+LOCUS       NG_011626               9488 bp    DNA     linear   PRI 10-APR-2026
+DEFINITION  Homo sapiens atypical chemokine receptor 1 (Duffy blood group)
+            (ACKR1), RefSeqGene (LRG_801) on chromosome 1.
+ACCESSION   NG_011626
+VERSION     NG_011626.3
+KEYWORDS    RefSeq; RefSeqGene.
+SOURCE      Homo sapiens (human)
+  ORGANISM  Homo sapiens
+            Eukaryota; Metazoa; Chordata; Craniata; Vertebrata; Euteleostomi;
+            Mammalia; Eutheria; Euarchontoglires; Primates; Haplorrhini;
+            Catarrhini; Hominidae; Homo.
+COMMENT     REVIEWED REFSEQ: This record has been curated by NCBI staff in
+            collaboration with Jill R. Storry. The reference sequence was
+            derived from AL035403.10 and KF455042.1.
+            This sequence is a reference standard in the RefSeqGene project.
+            
+            On Mar 29, 2017 this sequence version replaced NG_011626.2.
+            
+            Summary: The protein encoded by this gene is a glycosylated
+            membrane protein and a non-specific receptor for several
+            chemokines. The encoded protein is the receptor for the human
+            malarial parasites Plasmodium vivax and Plasmodium knowlesi.
+            Polymorphisms in this gene are the basis of the Duffy blood group
+            system. Two transcript variants encoding different isoforms have
+            been found for this gene. [provided by RefSeq, Jul 2008].
+PRIMARY     REFSEQ_SPAN         PRIMARY_IDENTIFIER PRIMARY_SPAN        COMP
+            1-5832              AL035403.10        69790-75621
+            5833-6204           KF455042.1         1-372
+            6205-9488           AL035403.10        75994-79277
+FEATURES             Location/Qualifiers
+     source          1..9488
+                     /organism="Homo sapiens"
+                     /mol_type="genomic DNA"
+                     /db_xref="taxon:9606"
+                     /chromosome="1"
+                     /map="1q23.2"
+     gene            <1..4301
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /note="cell adhesion molecule 3"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+     gene            complement(<1..3410)
+                     /gene="CADM3-AS1"
+                     /note="CADM3 antisense RNA 1"
+                     /db_xref="GeneID:100131825"
+                     /db_xref="HGNC:HGNC:40812"
+     mRNA            join(<739..864,1792..4301)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /product="cell adhesion molecule 3, transcript variant 2"
+                     /inference="similar to RNA sequence, mRNA (same
+                     species):RefSeq:NM_001127173.3"
+                     /exception="annotated by transcript or proteomic data"
+                     /transcript_id="NM_001127173.3"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+     mRNA            join(<739..864,1792..4301)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /product="cell adhesion molecule 3, transcript variant 1"
+                     /inference="similar to RNA sequence, mRNA (same
+                     species):RefSeq:NM_021189.5"
+                     /exception="annotated by transcript or proteomic data"
+                     /transcript_id="NM_021189.5"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+     mRNA            join(<739..864,1792..4301)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /product="cell adhesion molecule 3, transcript variant 3"
+                     /inference="similar to RNA sequence, mRNA (same
+                     species):RefSeq:NM_001346510.2"
+                     /exception="annotated by transcript or proteomic data"
+                     /transcript_id="NM_001346510.2"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+     CDS             join(<739..864,1792..1910)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /inference="similar to AA sequence (same
+                     species):RefSeq:NP_001333439.1"
+                     /exception="annotated by transcript or proteomic data"
+                     /note="isoform 3 precursor is encoded by transcript
+                     variant 3; brain immunoglobulin receptor; TSLC1-like 1;
+                     synaptic cell adhesion molecule 3; immunoglobulin
+                     superfamily member 4B"
+                     /codon_start=3
+                     /product="cell adhesion molecule 3 isoform 3 precursor"
+                     /protein_id="NP_001333439.1"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+                     /translation="MGAPAASLLLLLLLFACCWAPGGANLSQDDSQPWTSDETVVAGG
+                     TVVLKCQVKDHEDSSLQWSNPAQQTLYFGEKRALRDNRIQLVTSTPHELSISISNVAL
+                     ADEGEYTCSIFTMPVRTAKSLVTVLGIPQKPIITGYKSSLREKDTATLNCQSSGSKPA
+                     ARLTWRKGDQELHGEPTRIQEDPNDTPTAMIRPDPPHPREGQKLLLHCEGRGNPVPQQ
+                     YLWEKEGSVPPLKMTQESALIFPFLNKSDSGTYGCTATSNMGSYKAYYTLNVNDPSPV
+                     PSSSSTYHAIIGGIVAFIVFLLLIMLIFLGHYLIRHKGTYLTHEAKGSDDAPDADTAI
+                     INAEGGQSGGDDKKEYFI"
+     sig_peptide     741..812
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /inference="COORDINATES: ab initio prediction:SignalP:6.0"
+     CDS             join(<739..864,1792..1910)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /inference="similar to AA sequence (same
+                     species):RefSeq:NP_067012.1"
+                     /exception="annotated by transcript or proteomic data"
+                     /note="isoform 1 precursor is encoded by transcript
+                     variant 1; brain immunoglobulin receptor; TSLC1-like 1;
+                     synaptic cell adhesion molecule 3; immunoglobulin
+                     superfamily member 4B"
+                     /codon_start=3
+                     /product="cell adhesion molecule 3 isoform 1 precursor"
+                     /protein_id="NP_067012.1"
+                     /db_xref="CCDS:CCDS1182.1"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+                     /translation="MGAPAASLLLLLLLFACCWAPGGANLSQDGYWQEQDLELGTLAP
+                     LDEAISSTVWSSPDMLASQDSQPWTSDETVVAGGTVVLKCQVKDHEDSSLQWSNPAQQ
+                     TLYFGEKRALRDNRIQLVTSTPHELSISISNVALADEGEYTCSIFTMPVRTAKSLVTV
+                     LGIPQKPIITGYKSSLREKDTATLNCQSSGSKPAARLTWRKGDQELHGEPTRIQEDPN
+                     GKTFTVSSSVTFQVTREDDGASIVCSVNHESLKGADRSTSQRIEVLYTPTAMIRPDPP
+                     HPREGQKLLLHCEGRGNPVPQQYLWEKEGSVPPLKMTQESALIFPFLNKSDSGTYGCT
+                     ATSNMGSYKAYYTLNVNDPSPVPSSSSTYHAIIGGIVAFIVFLLLIMLIFLGHYLIRH
+                     KGTYLTHEAKGSDDAPDADTAIINAEGGQSGGDDKKEYFI"
+     sig_peptide     741..812
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /inference="COORDINATES: ab initio prediction:SignalP:6.0"
+     CDS             join(<739..864,1792..1910)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /inference="similar to AA sequence (same
+                     species):RefSeq:NP_001120645.1"
+                     /exception="annotated by transcript or proteomic data"
+                     /note="isoform 2 precursor is encoded by transcript
+                     variant 2; brain immunoglobulin receptor; TSLC1-like 1;
+                     synaptic cell adhesion molecule 3; immunoglobulin
+                     superfamily member 4B"
+                     /codon_start=3
+                     /product="cell adhesion molecule 3 isoform 2 precursor"
+                     /protein_id="NP_001120645.1"
+                     /db_xref="CCDS:CCDS44251.1"
+                     /db_xref="GeneID:57863"
+                     /db_xref="HGNC:HGNC:17601"
+                     /db_xref="MIM:609743"
+                     /translation="MGAPAASLLLLLLLFACCWAPGGANLSQDDSQPWTSDETVVAGG
+                     TVVLKCQVKDHEDSSLQWSNPAQQTLYFGEKRALRDNRIQLVTSTPHELSISISNVAL
+                     ADEGEYTCSIFTMPVRTAKSLVTVLGIPQKPIITGYKSSLREKDTATLNCQSSGSKPA
+                     ARLTWRKGDQELHGEPTRIQEDPNGKTFTVSSSVTFQVTREDDGASIVCSVNHESLKG
+                     ADRSTSQRIEVLYTPTAMIRPDPPHPREGQKLLLHCEGRGNPVPQQYLWEKEGSVPPL
+                     KMTQESALIFPFLNKSDSGTYGCTATSNMGSYKAYYTLNVNDPSPVPSSSSTYHAIIG
+                     GIVAFIVFLLLIMLIFLGHYLIRHKGTYLTHEAKGSDDAPDADTAIINAEGGQSGGDD
+                     KKEYFI"
+     sig_peptide     741..812
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /inference="COORDINATES: ab initio prediction:SignalP:6.0"
+     mat_peptide     join(813..864,1792..1910)
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /product="Cell adhesion molecule 3. /id=PRO_0000046067"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q8N126.1)"
+     misc_feature    813..815
+                     /gene="CADM3"
+                     /gene_synonym="BIgR; CMT2FF; IGSF4B; Necl-1; NECL1;
+                     synCAM3; TSLL1"
+                     /note="Not glycosylated.
+                     /evidence=ECO:0000269|PubMed:18420026; propagated from
+                     UniProtKB/Swiss-Prot (Q8N126.1); other site"
+     ncRNA           complement(join(<774..847,1800..2609,3238..3410))
+                     /ncRNA_class="lncRNA"
+                     /gene="CADM3-AS1"
+                     /product="CADM3 antisense RNA 1"
+                     /inference="similar to RNA sequence (same
+                     species):RefSeq:NR_037870.1"
+                     /exception="annotated by transcript or proteomic data"
+                     /transcript_id="NR_037870.1"
+                     /db_xref="GeneID:100131825"
+                     /db_xref="HGNC:HGNC:40812"
+     gene            5863..7488
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="atypical chemokine receptor 1 (Duffy blood group)"
+                     /db_xref="GeneID:2532"
+                     /db_xref="HGNC:HGNC:4035"
+                     /db_xref="MIM:613665"
+     mRNA            join(5863..5968,6449..7488)
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /product="atypical chemokine receptor 1 (Duffy blood
+                     group), transcript variant 2"
+                     /transcript_id="NM_002036.4"
+                     /db_xref="GeneID:2532"
+                     /db_xref="LRG:t1"
+                     /db_xref="HGNC:HGNC:4035"
+                     /db_xref="MIM:613665"
+     exon            5863..5968
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=1
+     CDS             join(5948..5968,6449..7438)
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="isoform b is encoded by transcript variant 2;
+                     glycoprotein D; Fy glycoprotein; Duffy blood group,
+                     chemokine receptor; Duffy blood group antigen; Duffy
+                     antigen receptor for chemokines; plasmodium vivax
+                     receptor; Duffy antigen chemokine receptor; Duffy blood
+                     group system protein; solute carrier family 29 member 1
+                     (augustine blood group); bloodgroup FY protein"
+                     /codon_start=1
+                     /product="atypical chemokine receptor 1 isoform b"
+                     /protein_id="NP_002027.2"
+                     /db_xref="CCDS:CCDS1183.1"
+                     /db_xref="GeneID:2532"
+                     /db_xref="LRG:p1"
+                     /db_xref="HGNC:HGNC:4035"
+                     /db_xref="MIM:613665"
+                     /translation="MGNCLHRAELSPSTENSSQLDFEDVWNSSYGVNDSFPDGDYGAN
+                     LEAAAPCHSCNLLDDSALPFFILTSVLGILASSTVLFMLFRPLFRWQLCPGWPVLAQL
+                     AVGSALFSIVVPVLAPGLGSTRSSALCSLGYCVWYGSAFAQALLLGCHASLGHRLGAG
+                     QVPGLTLGLTVGIWGVAALLTLPVTLASGASGGLCTLIYSTELKALQATHTVACLAIF
+                     VLLPLGLFGAKGLKKALGMGPGPWMNILWAWFIFWWPHGVVLGLDFLVRSKLLLLSTC
+                     LAQQALDLLLNLAEALAILHCVATPLLLALFCHQATRTLLPSLPLPEGWSSHLDTLGS
+                     KS"
+     misc_feature    join(5948..5968,6449..6517)
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     Region: Mediates Plasmodium vivax Duffy receptor (DBP)
+                     binding. /evidence=ECO:0000269|PubMed:16024106"
+     misc_feature    6473..6475
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000269|PubMed:12956774; propagated from
+                     UniProtKB/Swiss-Prot (Q16570.3); glycosylation site"
+     misc_feature    6515..6517
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="Sulfotyrosine.
+                     /evidence=ECO:0000269|PubMed:15720550; propagated from
+                     UniProtKB/Swiss-Prot (Q16570.3); sulfatation site"
+     misc_feature    6524..6526
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (Q16570.3); glycosylation site"
+     misc_feature    6548..6550
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="Sulfotyrosine.
+                     /evidence=ECO:0000269|PubMed:15720550; propagated from
+                     UniProtKB/Swiss-Prot (Q16570.3); sulfatation site"
+     misc_feature    6617..6679
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     misc_feature    6713..6775
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     misc_feature    6815..6886
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     misc_feature    6926..6988
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     misc_feature    7049..7111
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     misc_feature    7160..7222
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     misc_feature    7289..7351
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q16570.3);
+                     transmembrane region"
+     exon            6449..7488
+                     /gene="ACKR1"
+                     /gene_synonym="CCBP1; CD234; DARC; DARC/ACKR1; Dfy; FY;
+                     GPD; GpFy; WBCQ1"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=2
+ORIGIN      
+        1 gtttcactgg aacactaaac tcacctgcca caaaggaaca gtgttcttta catagatgat
+       61 agattgtggc cccttacatc tatcatcttt cgtaaggtgc tgtcaaagtg cctaattctt
+      121 ggctctatca ggttttactg ttccttccct atctgatctt agggcagtgg gtgaataggc
+      181 tgagaaggcc cttagagcta ggggagctgg ctcagaatat caagcagaca ggagggtaag
+      241 agggaatggg gacagagaag gaacactctg ataacccaga aattaaaaag aaaaagaggg
+      301 agaaaagaaa gaaggaaaca gggcaggagg agagaggaaa gaaggaagag aggcaggaag
+      361 aaggaaggaa aagaagaggc ggagggaggg aggaaggaag gaaggaagga aggaagaaat
+      421 ggagggaggg agggaaggaa ggagaggcat taaagcaatg atctttgacc aaggccaagc
+      481 ttcagtgcca agaactcaac ttagatgact aggtatgggc agatttattt attcattaat
+      541 ccatcaattt gttttaacaa atactataat acaggtgtgg cgtataagca caagataagg
+      601 catgatgaat gacactgctc cattttcctg atgttagtac ctgttccctg ctgtgtaaga
+      661 ctattcatgg ccaagttgga atgctataag ataagggctc tccccagatc tgactgtgtg
+      721 tgttgccctt tcttccagac cccagtccgg tgccctcctc ctccagcacc taccacgcca
+      781 tcatcggtgg gatcgtggct ttcattgtct tcctgctgct catcatgctc atcttccttg
+      841 gccactactt gatccggcac aaaggtcaga ggcacaaaga gagcatcagc agaacttggg
+      901 aggggcaggg agaccaatca gaggcaggca cgaggagaag cagacagtgg aaagggcctt
+      961 cagagacttg tcagcccttt ggagtgttta gggaattaaa aatggagcca accctatcat
+     1021 tgccaaccct gtgataactg agcaccacca accccgcagt aaagcctgat cacttgggga
+     1081 tcgtccaagt gaaatcaaac cttcccactc agtcagcggt tgctcccatg ctgctctacc
+     1141 tccaggtctc ctgctgcaag acagagagct cctgaaactg catctccatc tcattgcttc
+     1201 ctgcgctttc ttcctttctg tctgtttaac ctcattttct ttctcctttg atctcattgc
+     1261 ctttctttcc tctccccctt ttctaccttc tctcttatat ccatgccttc tctctaccct
+     1321 cttctcacat tccttcctct cagacttcct gctctgctat taattctagc cagcggcctg
+     1381 actccatagg ctggtcatac ataagccaga tctcaattgc tttgctcatg aagctgacat
+     1441 agcagatccc ccgtcaccaa gttgcgtgca cacgcatgca tacacacaca cacgcatgcg
+     1501 tgcaagcaca cacacacaca cacacacaca cacacacaca cacttctctt tcttgctttg
+     1561 tattatagat gagattctac ttaggggtag gattcattat tcatgaaggg tgtggtcagg
+     1621 tgaggcatgt tggaagcaaa atgcgaatta ggtaaggtgg agtagaagag agctattggc
+     1681 aagagaaaaa ttacttgagc agtgtgtgag tgggtgggtg agaaagtggg cagggtggac
+     1741 tcagaggttg ggaagctgct cctgagagga gaagcctctg tctctacaca ggaacctacc
+     1801 tgacacatga ggcaaaaggc tccgacgatg ctccagacgc ggacacggcc atcatcaatg
+     1861 cagaaggcgg gcagtcagga ggggacgaca agaaggaata tttcatctag aggcgcctgc
+     1921 ccacttcctg cgccccccag gggccctgtg gggactgctg gggccgtcac caacccggac
+     1981 ttgtacagag caaccgcagg gccgcccctc ccgcttgctc cccagcccac ccacccccct
+     2041 gtacagaatg tctgctttgg gtgcggtttt gtactcggtt tggaatgggg agggaggagg
+     2101 gcggggggag gggagggttg ccctcagccc tttccgtggc ttctctgcat ttgggttatt
+     2161 attatttttg taacaatccc aaatcaaatc tgtctccagg ctggagaggc aggagccctg
+     2221 gggtgagaaa agcaaaaaac aaacaaaaaa caaaaccctg gagtgttagg aggagagtga
+     2281 aggtagaggg gtgaggaagg gtaaggggca gggctggttt cagctggggg ctctcaccag
+     2341 ccctcctttc agcctctaca acagagcagc ttcccagact tctccaggaa cccagaaacg
+     2401 ggatggttgt cggcaaaggt tgggagtggc ttttcctctg gtagccacac acctgagcac
+     2461 tacggacagg gaggcaggtg ccaccttgac acctctcttc catagcaatg ggaaagtgat
+     2521 gagtgcggga gtcctgagga gatgtggcct gcagacaaca tgcagccatg cagggaccca
+     2581 ggactgtaac ctggggagga cgcgggtccc tgcaaggaag agtagatttg gagaggaagg
+     2641 atggaggtgg actctcaccc cattcccccc ggaaatgaac aaagccgggc cctttccata
+     2701 ggaactgccc ttggagatag cagagtgtgg ctgcccctcc ttgctccagc agcagtggga
+     2761 gaggcactgc tctggggcct gaactgcctc tgcttccccc cctgaggggc ccctcactct
+     2821 tacccaagac tctggattgt tgcacggcaa ccactcctcc catggcattg ctcagcaact
+     2881 acttctccct tcccggccac cctgtgcccc cttcctggtc ccaacgccag cccttcatcc
+     2941 ttcctccctc agcagccagg cagacataac aacaaaacta ctaaaaggag cttcactgca
+     3001 gtgagctgtt tcctgcccaa actaagggaa taatgtgaac tgtgtgcatg tgtgtggtgt
+     3061 gtatgcatgt gtgcatgtgt gtgtgtgtgt gtgcatgtgt gtgagtgagt gagaggcaga
+     3121 gcgaggaact gaggaggagg gctaagagcc aggggtcctg ggcaagtgga cagggctgtg
+     3181 ggacatgttg gggaggcttt gggaatgggg tattcctagt cagggttcac acctcacctg
+     3241 ggatgttgtt ccatgctggt atttcctctg ccacccccaa tgcccatcgg tcttggagaa
+     3301 aggagtcccc gggtgtgtgt ttgcccagct gtccattcta tctctccctt aaacacagag
+     3361 cattcagccc ttccctggat ttccctcctc tgagccatgg agtcagtgcc acagcctttg
+     3421 ctatgcacct ctcaggcctc tccttggcgt tgaccctgga aagacctacc accacctatt
+     3481 ttttcccata gtctgtaccc agtgagttga aggctgggtc cccacccttc cttttgattt
+     3541 cctgtcttcc ttctcgtggc cccagctggt tgctgtggag atgaggttcc tggtcctccc
+     3601 tgtcctggct ggactgcccc gcctcagatc caggatgccc ttggcatcgc tcccaccctc
+     3661 ccccagcttt tcctccctgg tctgacaatg ggcatgcaaa aaggggcagc tgcaatctag
+     3721 caggcctgcc cacccccttc agttcaggta atacagttgt gaatcttcca gccgctggtt
+     3781 agggccttgg gcaccacagg cagcccctca cctaagccgg ggcctactcc tcttacaaca
+     3841 gcaagagagc cctggggccc caggcctgtt gagcttcttg tctcccagca cccgcttttg
+     3901 ggaaaatgac ttttcctctt caagctgaac cactctgtcc atattacaca gaagccatat
+     3961 ttgtacgggg gggtgggagg gagaggggct gttgtgctgt gtgtgtctgt ccaggggtgg
+     4021 gggggtgggg gaagggagca gggaggggac cgtgtatctt tataatcttt ctaactctcc
+     4081 tgtgctaatc tcagaggggt caccctcaat atatctggat tatccgtgtc attcagctgc
+     4141 ctcctttctg gtcctcttgc tgctgctggg atgtgtgtat gtgagggtct tcttcccata
+     4201 ccccttgcac ctggtgcctg gtgcctcaaa aggtggtgtg tcccttgcca ggccactctc
+     4261 aagaatatct atgtacagca acaatataac tctacaaggg agagaagtgt gttcacttcc
+     4321 ttttgctaag cccttccttt ccagagagtg tcttgggggg catctgactg cttcccccca
+     4381 ccctctgcca ggcattgctg gagaatgtta agacggcgat ggagatgcca tcaaccccac
+     4441 cctgcagagc atcaccagac accaccagac caaattcact ttccagcccc ttcatgttga
+     4501 acctgaaact tgagctagtg tcttgggaga aaagggggaa atctctacga ggtacccatc
+     4561 cttctgcacc ttaggtctga ggtgcttggc cccctaggaa gccctacatg aatgggacag
+     4621 aaggtcctta acaacactgg agatgaagca gccgatgctg ttttggacaa atgaaacagc
+     4681 gtcccctaac cagccctttc tatctcattg ttctgacttg gacacgccat ggctcaccgc
+     4741 tcccaaagtc cccactatgt ctccctagct gaggaaataa aagcagagag gggtgatgaa
+     4801 acagtgacga tcctggggaa acagctgagg aggggaggga gggggaagaa gccactaaaa
+     4861 aagtgaaatg tgcttgggag aatcggcctg cctgcagggt agatgccctt tctctctgct
+     4921 ggccagctct gcccctcagt gagaaacttt acatattgct aagatgcctg gccaatgaaa
+     4981 cagttccaga gactttatgt cccccagtag aaatatgaat agaaatcacc ctgtgggcaa
+     5041 tggtcccatt ttaaaatatg ctgtcccatt gtcccctaga gcctacttta acttgtcaga
+     5101 ccatgtattc cacttcatat gcaagaggca tgcactgagc ccataggtgg ctaggcaaac
+     5161 acccaatagc tccctgaaat ggcttcatta tgcagcctcg acagccaccc caaccctccc
+     5221 actctcacac tgaaacaccc agacctagag atagctagac acacccagac acccgccaag
+     5281 cccctcacat acagatatgt gcacaatgat acacagcaaa cgtacacaga gttcagtaca
+     5341 cacaaagagc tcacgcccac gtgcacacac ccctcagttg ggacagagtt gaccaccacc
+     5401 acctttctcc caaacacatg gcttttgaac tgcctttcct tggatccagt tcaaggggat
+     5461 ggaggagcag tgagagtcag ccgcccttcc actccaattt cccagcacct cccttatctc
+     5521 tgcctcacaa gtcacccagc ccccctctct tccttccttg tgcttgaaga atctctcctt
+     5581 gctggaaagc cccctgtttt ctcaatctcc ctttccactt cggtaaaatc tctacttgct
+     5641 ggaaagcccc ctgttttctc aatctccctt tccacttcgg taaaatgccc actttctggt
+     5701 ccccaccttt ttcctgagtg tagtcccaac cagccaaatc caacctcaaa acaggaagac
+     5761 ccaaggccag tgacccccat aggcctgagg cttgtgcagg cagtgggcgt ggggtaaggc
+     5821 ttcctgatgc cccctgtccc tgcccagaac ctgatggccc tcattagtcc ttggctctta
+     5881 tcttggaagc acaggcgctg acagccgtcc cagcccttct gtctgcgggc ctgaaccaaa
+     5941 cggtgccatg gggaactgtc tgcacagggt gagtatgggg ccaggcccca gagtccctta
+     6001 tccctatgcc cctcatttcc cctgctgttt gcccctcagt ctttatatct cttccttttc
+     6061 ctcctcatct tttctccctt cctgcttttt tcctcttcct tcaaagtctt tttccttctc
+     6121 tccttcctat gctagcctcc tagctccctc ttgtgtccct ccctttgcct ttgagtcagt
+     6181 tccatcctgg tctcttggtg ccttttcctt ctgaccttgc actgctcctc cagccccagc
+     6241 tgccctggct tccccaggac tgttcctgct ccggctcttc aggctccctg ctttgtcctt
+     6301 ttccactgtc cgcactgcat ctgactcctg cagagacctt gttctcccac ccgaccttcc
+     6361 tctctgtcct cccctcccac ctgcccctca attcccagga gactcttccg gtgtaactct
+     6421 gatggcctcc tctgggtatg tcctccaggc ggagctctcc ccctcaactg agaactcaag
+     6481 tcagctggac ttcgaagatg tatggaattc ttcctatggt gtgaatgatt ccttcccaga
+     6541 tggagactat ggtgccaacc tggaagcagc tgccccctgc cactcctgta acctgctgga
+     6601 tgactctgca ctgcccttct tcatcctcac cagtgtcctg ggtatcctag ctagcagcac
+     6661 tgtcctcttc atgcttttca gacctctctt ccgctggcag ctctgccctg gctggcctgt
+     6721 cctggcacag ctggctgtgg gcagtgccct cttcagcatt gtggtgcccg tcttggcccc
+     6781 agggctaggt agcactcgca gctctgccct gtgtagcctg ggctactgtg tctggtatgg
+     6841 ctcagccttt gcccaggctt tgctgctagg gtgccatgcc tccctgggcc acagactggg
+     6901 tgcaggccag gtcccaggcc tcaccctggg gctcactgtg ggaatttggg gagtggctgc
+     6961 cctactgaca ctgcctgtca ccctggccag tggtgcttct ggtggactct gcaccctgat
+     7021 atacagcacg gagctgaagg ctttgcaggc cacacacact gtagcctgtc ttgccatctt
+     7081 tgtcttgttg ccattgggtt tgtttggagc caaggggctg aagaaggcat tgggtatggg
+     7141 gccaggcccc tggatgaata tcctgtgggc ctggtttatt ttctggtggc ctcatggggt
+     7201 ggttctagga ctggatttcc tggtgaggtc caagctgttg ctgttgtcaa catgtctggc
+     7261 ccagcaggct ctggacctgc tgctgaacct ggcagaagcc ctggcaattt tgcactgtgt
+     7321 ggctacgccc ctgctcctcg ccctattctg ccaccaggcc acccgcaccc tcttgccctc
+     7381 tctgcccctc cctgaaggat ggtcttctca tctggacacc cttggaagca aatcctagtt
+     7441 ctcttcccac ctgtcaacct gaattaaagt ctacactgcc tttgtgaagc gggtggtttc
+     7501 ttattttgtc tggggagaag aaggagaatg gagagagaga catttttatg tcagactttc
+     7561 ttgccagtgt ctgcttctat agctggcttg ggaagaaggt gaatgatgaa taaataccct
+     7621 cagggtacac agatgttctc ttgaggtgtg gggtcacggc catctcaagg gagaagagaa
+     7681 gaggaaccag agcatgaggg gagtcattaa accaaaaaaa acagaaggga tggcttagct
+     7741 ggaaaaaaag ctgttctggg aagcaaatgg aataggaact caaactgaga gataaacagt
+     7801 gaagagtgat gacaaagccc agagcaatac cacctccccc tgtccaacct gcccagcctc
+     7861 tgtcttctgt ctcctctctg gctttgttta gtgattagga cagtggtggg gaaggtgaaa
+     7921 gaagcatccc aggggatgtt actcagttca gggaacatat caaggtaatt taaaaagcca
+     7981 cttcctggga gtcatctctc ccaggttcct cagcatgacc tgaatgtgcg tgcgtgtgtg
+     8041 tgtgtgtgtg tgtgtacaca tctgtttctc gatctgttag aatctacctt tatgttagat
+     8101 gtatgcatgt aaaaacatat gtccacccat gagcttgcat ctctgtcagc acctgaactg
+     8161 cgcacacctg tgcgtgtgca ctgacttttc tcaggaccca aacccccact caattctgca
+     8221 ctcatccctg ttcacaggat atagaatcgg gatttatgac tcactcctta cccaaatgag
+     8281 ttttctttac cctggttttt aagcctagtc ttttctgtgt aggatgtgtg gagggaagaa
+     8341 aagatcaaga agttgtgaag ggtggagaaa cttgaagggg gaggccctga tttgattcat
+     8401 cttctgcttg gaattccccg aatttccctt tcagaatctc agcttttgaa ataaaccttt
+     8461 atttcccaca tacatctttc cttccacctt ccacacaata ccccaatccc ctgggcacct
+     8521 ttttcccaac ccctgattct ctggctgctt aatcatgacc tttgagattt ttctcagtct
+     8581 ctacctaccc aagtttagat ggctggaagg acagaaaccc ctcctcatca ggggcacagc
+     8641 ttttaccacc aagagcaaat tcaccctcta cccaagaggc tacaaaacag ttagttccta
+     8701 cctctaaccc aactaaaggc tggggaaact tgagcagata cgttctatca gtttgaaccc
+     8761 aattaccatc ttaccatttt ccaaagatat gctatacctg gtttctttac taaaatgttt
+     8821 ctgcttgact ctctgggctt gggaatagta ggcgagtgcg ggagaggtgc agagatgagt
+     8881 tagaatagct taggcaggag ggtgcaaaag gcttagggaa ttttcctggg tgggtgccac
+     8941 gacaaggcct ctaaatctcc cacctcctgt ctcttagcaa ccaccaggtt agctcctgat
+     9001 tggttcgtcc tcaattgaaa ggcgggattt agggaccgat tgagacgcgg gagacattct
+     9061 gaaacagaaa ggaagggaga gaaaatgaag agaaaggaaa taatttacaa acctaaatta
+     9121 tgctctggtt tccaaccaca gttcatgaat gtgttctagt attttttccc ccgctttttt
+     9181 ttttccaggc ttctctcaat atccccctcc cgtccttgac cactcttgca attctaccag
+     9241 atgttgctgt cctcccttac aaggtactga tttggaagct gacctagttg agggggagga
+     9301 gagggcgttt ttgactccct gaatcttcca gtgtcaacct gatgcaaggg aggcttaatt
+     9361 taagaccagt aggcttgtct tatctgcccc caaccctgtg cctctggata gaaatccctg
+     9421 gtcagtcagt ccagttagag agaaccccag actcctgggt aatagcttgg cagctctcat
+     9481 ggctttca
+//
+

@@ -10,7 +10,6 @@ from utils.fy_analyzer import FYAnalyzer
 from utils.jk_analyzer import JKAnalyzer
 from utils.h_analyzer import HAnalyzer
 from utils.mns_analyzer import MNSAnalyzer
-from utils.di_analyzer import DIAnalyzer
 
 
 @dataclass
@@ -75,18 +74,6 @@ def analyze_jk(analyzer: Any, query_sequence) -> Any:
 
 def analyze_h(analyzer: Any, query_sequence) -> Any:
     """H (FUT1 / Bombay) accepts a single sequence string OR a list of
-    (id, seq) reads for multi-read consensus voting."""
-    return analyzer.analyze(query_sequence)
-
-
-def analyze_mns(analyzer: Any, query_sequence) -> Any:
-    """MNS (GYPA + GYPB) accepts a single sequence string OR a list of
-    (id, seq) reads for multi-read consensus voting."""
-    return analyzer.analyze(query_sequence)
-
-
-def analyze_di(analyzer: Any, query_sequence) -> Any:
-    """DI (Diego / SLC4A1) accepts a single sequence string OR a list of
     (id, seq) reads for multi-read consensus voting."""
     return analyzer.analyze(query_sequence)
 
@@ -183,34 +170,5 @@ register_system(
         accepts_multiple_files=True,
         analyzer_factory=lambda: HAnalyzer(),
         analyze_method=analyze_h,
-    )
-)
-
-register_system(
-    BloodGroupSystemConfig(
-        key="MNS",
-        display_name="MNS",
-        description=("MNS system (GYPA + GYPB) multi-read consensus "
-                     "genotyping via c.59C>T (M/N) on GYPA and c.143C>T "
-                     "(S/s) on GYPB. Reports the 4×3 phenotype matrix "
-                     "and flags the double-het phase ambiguity."),
-        upload_types=["fasta", "fa", "ab1"],
-        accepts_multiple_files=True,
-        analyzer_factory=lambda: MNSAnalyzer(),
-        analyze_method=analyze_mns,
-    )
-)
-
-register_system(
-    BloodGroupSystemConfig(
-        key="DI",
-        display_name="Diego",
-        description=("Diego (Di(a)/Di(b)) multi-read consensus "
-                     "genotyping via SLC4A1 c.2561T>C (p.Pro854Leu, "
-                     "exon 19). Single-axis system, three phenotypes."),
-        upload_types=["fasta", "fa", "ab1"],
-        accepts_multiple_files=True,
-        analyzer_factory=lambda: DIAnalyzer(),
-        analyze_method=analyze_di,
     )
 )

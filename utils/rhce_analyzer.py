@@ -200,6 +200,9 @@ MIN_LOCAL_IDENTITY_FOR_CALLING = 85.0  # window identity threshold to trust a SN
 # in the read at near-perfect identity regardless of surrounding introns.
 SNP_PROBE_HALF = 50               # bp of reference flanking the SNP to use as probe
 SNP_PROBE_MIN_BASES = 60          # minimum aligned (non-gap) bases for a usable probe hit
+MIN_PHRED_AT_SNP = 30             # per-base Phred Q-score required AT the SNP column
+                                  # when AB1 quality is available. Q30 = 1-in-1000
+                                  # base error rate (lab standard).
 
 
 class RHCEReferenceMissingError(RuntimeError):
@@ -420,6 +423,28 @@ class RHCEAnalyzer:
             cursor += 1
         return None
 
+    @staticmethod
+    def _query_pos_at_alignment_column(
+        alignment, col: int, query_len: int, strand: str
+    ) -> Optional[int]:
+        """Map alignment column -> 0-based position in the original query
+        sequence (before reverse-complement). Used for Phred-at-SNP lookup."""
+        query_aligned = str(alignment[1])
+        try:
+            q_cursor = int(alignment.coordinates[1][0])
+        except (AttributeError, IndexError, TypeError):
+            q_cursor = 0
+        for c, q_char in enumerate(query_aligned):
+            if c == col:
+                if q_char == '-':
+                    return None
+                if strand == 'reverse':
+                    return query_len - 1 - q_cursor
+                return q_cursor
+            if q_char != '-':
+                q_cursor += 1
+        return None
+
     # ─── SNP genotyping ──────────────────────────────────────────────────
     @staticmethod
     def _local_window_identity(alignment, center_col: int) -> tuple:
@@ -453,12 +478,19 @@ class RHCEAnalyzer:
         snp_info: dict,
         window_pct: float,
         window_n: int,
+        query_seq: Optional[str] = None,
+        query_quality: Optional[list] = None,
+        strand: Optional[str] = None,
     ) -> dict:
         """Convert an aligned (ref_base, query_base) pair at `col` into a SNP call dict.
 
         Assumes the local-window quality check has already passed. Shared by
         the whole-read alignment path (`_genotype_snp_at`) and the per-SNP
         probe path (`_genotype_snp_via_probe`).
+
+        When ``query_quality`` is provided, additionally gates the call by
+        the per-base Phred Q-score at the SNP column. Skipped for FASTA
+        inputs (no quality data).
         """
         ref_aligned = str(alignment[0])
         query_aligned = str(alignment[1])
@@ -469,6 +501,23 @@ class RHCEAnalyzer:
             'local_window_identity': round(window_pct, 1),
             'local_window_bases': window_n,
         }
+
+        # Phred Q-score gate at the SNP column.
+        if query_quality is not None and query_seq is not None and strand is not None:
+            q_pos = self._query_pos_at_alignment_column(
+                alignment, col, len(query_seq), strand
+            )
+            if q_pos is not None and 0 <= q_pos < len(query_quality):
+                phred = int(query_quality[q_pos])
+                meta['phred_at_snp'] = phred
+                if phred < MIN_PHRED_AT_SNP:
+                    return {
+                        'covered': True,
+                        'call':    'no_call',
+                        'reason':  (f'low Phred at SNP position '
+                                    f'(Q={phred} < Q{MIN_PHRED_AT_SNP})'),
+                        **meta,
+                    }
 
         if ref_b_at_col != snp_info['ref_base']:
             return {
@@ -515,7 +564,15 @@ class RHCEAnalyzer:
             **meta,
         }
 
-    def _genotype_snp_at(self, alignment, ref_index_0based: int, snp_info: dict) -> Optional[dict]:
+    def _genotype_snp_at(
+        self,
+        alignment,
+        ref_index_0based: int,
+        snp_info: dict,
+        query_seq: Optional[str] = None,
+        query_quality: Optional[list] = None,
+        strand: Optional[str] = None,
+    ) -> Optional[dict]:
         """Whole-read-alignment SNP genotyper, gated by the local-window check."""
         col = self._ref_index_to_alignment_column(alignment, ref_index_0based)
         if col is None:
@@ -542,7 +599,12 @@ class RHCEAnalyzer:
                 'local_window_bases': window_n,
             }
 
-        return self._call_snp_from_column(alignment, col, snp_info, window_pct, window_n)
+        return self._call_snp_from_column(
+            alignment, col, snp_info, window_pct, window_n,
+            query_seq=query_seq,
+            query_quality=query_quality,
+            strand=strand,
+        )
 
     @staticmethod
     def _probe_alignment_identity(alignment) -> tuple:
@@ -564,7 +626,12 @@ class RHCEAnalyzer:
             return 0.0, 0
         return (matches / total * 100.0), total
 
-    def _genotype_snp_via_probe(self, query_seq: str, snp_info: dict) -> dict:
+    def _genotype_snp_via_probe(
+        self,
+        query_seq: str,
+        snp_info: dict,
+        query_quality: Optional[list] = None,
+    ) -> dict:
         """Per-SNP genotyping by aligning a small reference probe against the read.
 
         The whole-read alignment can be unreliable for multi-exon genomic
@@ -573,6 +640,8 @@ class RHCEAnalyzer:
         (±SNP_PROBE_HALF bp around the SNP) is entirely exonic, so it locates
         the corresponding exonic region in the read at near-perfect identity
         regardless of surrounding introns.
+
+        ``query_quality`` enables the Phred-Q30-at-SNP-column gate.
         """
         ref_index = self._cdna_to_ref_index(snp_info['cDNA_position'])
         if ref_index is None:
@@ -624,15 +693,28 @@ class RHCEAnalyzer:
             }
 
         result = self._call_snp_from_column(
-            best['alignment'], col, snp_info, best['identity'], best['n']
+            best['alignment'], col, snp_info, best['identity'], best['n'],
+            query_seq=query_seq,
+            query_quality=query_quality,
+            strand=best['strand'],
         )
         result['probe_strand'] = best['strand']
         return result
 
     # ─── Public single-read pipeline ─────────────────────────────────────
-    def analyze_single_read(self, query_seq: str, read_id: Optional[str] = None) -> dict:
+    def analyze_single_read(
+        self,
+        query_seq: str,
+        read_id: Optional[str] = None,
+        query_quality: Optional[list] = None,
+    ) -> dict:
         """
         Analyze one read against the RHCE reference.
+
+        ``query_quality`` is optional per-base Phred Q-scores. When provided,
+        each SNP call is additionally gated by Q-score at the SNP column
+        (Q30 default — lab standard). FASTA inputs pass None and skip the
+        gate (legacy 2-tuple behaviour).
 
         Returns a dict shaped to be consumed by the multi-read consensus
         stage (step 3) and the UI:
@@ -686,7 +768,9 @@ class RHCEAnalyzer:
         # to introns and primer flanks because each probe is small and exonic.
         callable_read = best['identity'] >= MIN_IDENTITY_FOR_CALLING
         snp_calls: dict = {
-            snp_name: self._genotype_snp_via_probe(query_str, snp_info)
+            snp_name: self._genotype_snp_via_probe(
+                query_str, snp_info, query_quality=query_quality,
+            )
             for snp_name, snp_info in RHCE_DIAGNOSTIC_SNPS.items()
         }
 
@@ -696,10 +780,18 @@ class RHCEAnalyzer:
             1 for c in snp_calls.values()
             if c.get('covered') and c.get('call') and c.get('call') != 'no_call'
         )
+        low_phred_at_snp = sum(
+            1 for c in snp_calls.values()
+            if (c.get('phred_at_snp') is not None
+                and c.get('phred_at_snp') < MIN_PHRED_AT_SNP)
+        )
 
         reason = (
             f"Read aligned at {best['identity']:.1f}% identity ({best['strand']}); "
-            f"{trusted_snps} diagnostic SNP(s) cleared the local-window quality gate."
+            f"{trusted_snps} diagnostic SNP(s) cleared the local-window quality gate"
+            + (f"; {low_phred_at_snp} blocked by Phred Q{MIN_PHRED_AT_SNP} gate"
+               if low_phred_at_snp else "")
+            + "."
         )
 
         return {
@@ -712,6 +804,7 @@ class RHCEAnalyzer:
             'snp_calls': snp_calls,
             'callable': callable_read,
             'trusted_snps': trusted_snps,
+            'low_phred_at_snp': low_phred_at_snp,
             'reason': reason,
         }
 
@@ -733,8 +826,8 @@ class RHCEAnalyzer:
 
         normalized = self._normalize_reads(reads)
         per_read = [
-            self.analyze_single_read(seq, read_id=rid)
-            for rid, seq in normalized
+            self.analyze_single_read(seq, read_id=rid, query_quality=qual)
+            for rid, seq, qual in normalized
         ]
 
         snp_consensus = self._consensus_snp_calls(per_read)
@@ -773,23 +866,35 @@ class RHCEAnalyzer:
 
     @staticmethod
     def _normalize_reads(reads) -> list:
-        """Coerce input into a list of (read_id, sequence) tuples."""
+        """Coerce input into ``[(read_id, sequence, quality_or_None), ...]``.
+
+        Accepts: a single seq str, a list of seq strs, a list of (rid, seq)
+        2-tuples (FASTA-style, no quality), or a list of (rid, seq, quality)
+        3-tuples (AB1-style, per-base Phred Q-scores). 2-tuples are widened
+        with quality=None for backward compat.
+        """
         if isinstance(reads, str):
-            return [('read_1', reads)]
+            return [('read_1', reads, None)]
         if isinstance(reads, (list, tuple)):
             out = []
             for i, item in enumerate(reads, 1):
                 if isinstance(item, str):
-                    out.append((f'read_{i}', item))
+                    out.append((f'read_{i}', item, None))
                 elif isinstance(item, (list, tuple)) and len(item) == 2:
                     rid, seq = item
-                    out.append((str(rid) if rid is not None else f'read_{i}', seq))
+                    out.append((str(rid) if rid is not None else f'read_{i}',
+                                seq, None))
+                elif isinstance(item, (list, tuple)) and len(item) == 3:
+                    rid, seq, qual = item
+                    out.append((str(rid) if rid is not None else f'read_{i}',
+                                seq, qual))
                 else:
                     raise ValueError(
-                        f"Unsupported read entry at index {i-1}: expected str or (id, seq)"
+                        f"Unsupported read entry at index {i-1}: expected str, "
+                        f"(id, seq), or (id, seq, quality)"
                     )
             return out
-        raise ValueError("reads must be a string, list of strings, or list of (id, seq) tuples")
+        raise ValueError("reads must be a string, list of strings, or list of (id, seq[, quality]) tuples")
 
     @staticmethod
     def _consensus_snp_calls(per_read_results: list) -> dict:

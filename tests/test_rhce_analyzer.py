@@ -315,6 +315,38 @@ def test_multi_read_concordance_yields_high_confidence(
 
 
 # --------------------------------------------------------------------------- #
+# Phred Q-score gate at SNP column                                            #
+# --------------------------------------------------------------------------- #
+
+def test_phred_gate_blocks_call_when_snp_base_below_q30(
+    analyzer: RHCEAnalyzer, reference_seq: str
+):
+    """Q-score gate on the c.48 SNP (G/C, primary C/c discriminator)."""
+    info = RHCE_DIAGNOSTIC_SNPS["c.48G>C"]
+    snp_idx = (info["cDNA_position"] - 1) + analyzer.cdna_offset
+    quality = [40] * len(reference_seq)
+    quality[snp_idx] = 15
+    result = analyzer.analyze([("low_q_at_snp", reference_seq, quality)])
+    primary = result["snp_consensus"]["c.48G>C"]
+    assert primary["consensus"] == "no_call"
+    snp_call = result["per_read_details"][0]["snp_calls"]["c.48G>C"]
+    assert snp_call.get("phred_at_snp") == 15
+    assert "Phred" in snp_call.get("reason", "")
+
+
+def test_no_quality_supplied_skips_phred_gate_backward_compat(
+    analyzer: RHCEAnalyzer, reference_seq: str
+):
+    """Legacy 2-tuple (no quality) must still work."""
+    result = analyzer.analyze([("legacy_2tuple", reference_seq)])
+    # Ensure the pipeline ran and at least one SNP was called.
+    assert isinstance(result.get("phenotype"), str) and result["phenotype"]
+    snp_call = result["per_read_details"][0]["snp_calls"]["c.48G>C"]
+    # Phred field should not be set when quality wasn't passed.
+    assert snp_call.get("phred_at_snp") is None
+
+
+# --------------------------------------------------------------------------- #
 # Real patient FASTAs (smoke test, skipped if data missing)                   #
 # --------------------------------------------------------------------------- #
 

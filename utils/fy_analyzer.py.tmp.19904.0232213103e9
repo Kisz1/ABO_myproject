@@ -1,0 +1,834 @@
+"""
+FY Analyzer - ISBT-Informed Duffy (FY) Analysis
+
+References:
+- ISBT 008 (FY system) v6.4 - ACKR1 gene (formerly DARC)
+- NM_002036.4 (ACKR1 mRNA, cDNA reference)
+- NG_011626.3 (ACKR1 genomic, includes promoter — REQUIRED for GATA -67T>C)
+
+Diagnostic SNP scope (Phase 1):
+    FY*A/FY*B:    c.125G>A (p.Gly42Asp) - primary FYA/FYB discriminator
+                  FY*01 = FY*A (Fy(a+)), FY*02 = FY*B (Fy(b+))
+    FY*Null/GATA: -67T>C in the GATA-1 box of the ACKR1 promoter
+                  Silences ACKR1 expression in erythrocytes; gives Fy(a-b-)
+                  while preserving expression on non-erythroid tissues.
+                  *Requires a genomic reference that includes the promoter.*
+    FY*X (weak):  c.265C>T (p.Arg89Cys) - weak FYB expression marker
+                  Does not change A/B serology but FYB strength is reduced.
+
+----------------------------------------------------------------------------
+Reference-file audit note
+----------------------------------------------------------------------------
+NM_002036.4 / NG_011626.3 SHOULD carry the FY*A allele base ('G') at c.125
+— the FY*A allele is the more common reference deposit. This is the
+assumption baked into FY_DIAGNOSTIC_SNPS below. If a future NCBI revision
+inherits a FY*B clone (i.e. base 'A' at c.125), swap ref_base/alt_base and
+ref_call/alt_call in the c.125G>A entry and set `parity_inverted: True`,
+mirroring the RHCE c.178 treatment.
+
+A regression test (tests/test_fy_analyzer.py) enforces this audit.
+
+----------------------------------------------------------------------------
+Architecture
+----------------------------------------------------------------------------
+Probe-based SNP calling (same pattern as RHCE / KEL): a small reference
+probe (±50 bp) around each SNP is locally aligned against the read. This
+is intron-tolerant so genomic Sanger amplicons against a cDNA reference
+still call correctly on exonic SNPs — and it lets us address the GATA
+promoter SNP on a genomic reference using the same code path.
+"""
+
+from pathlib import Path
+from typing import Optional
+
+from Bio import SeqIO
+from Bio.Align import PairwiseAligner
+from Bio.Seq import Seq
+
+
+# ─── Reference file locations ────────────────────────────────────────────────
+DATA_DIR = Path(__file__).resolve().parent / "data"
+FY_GENBANK_PATH = DATA_DIR / "fy_referance.gb"
+FY_FASTA_PATH = DATA_DIR / "fy_cdna_reference.fasta"
+
+
+# ─── ISBT-defined diagnostic SNPs ────────────────────────────────────────────
+# `position_type` is 'cdna' (1-based in mRNA, like KEL/RHCE) or 'promoter'
+# (bp 5' of the ATG; requires a genomic reference with cds_start_genomic set).
+FY_DIAGNOSTIC_SNPS = {
+    'c.125G>A': {
+        'position_type':    'cdna',
+        'cDNA_position':    125,
+        'exon':             2,
+        'ref_base':         'G',
+        'alt_base':         'A',
+        'antigen_axis':     'A/B',
+        'ref_call':         'A',    # FY*A (Fya)
+        'alt_call':         'B',    # FY*B (Fyb)
+        'role':             'primary',
+        'significance':     'p.Gly42Asp - primary FYA/FYB discriminator',
+        'reference':        'ISBT 008 v6.4 (FY*01 / FY*02)',
+    },
+    '-67T>C (GATA)': {
+        'position_type':    'promoter',
+        'promoter_offset':  -67,    # 67 bp 5' of ATG
+        'ref_base':         'T',
+        'alt_base':         'C',
+        'antigen_axis':     'expression',
+        'ref_call':         'expressed',
+        'alt_call':         'silenced',
+        'role':             'modifier',
+        'significance':     ('-67T>C in GATA-1 box silences erythroid ACKR1 '
+                             'expression on the affected haplotype (Fy(a-b-) '
+                             'when homozygous)'),
+        'reference':        'ISBT 008 v6.4 (FY*02N.01)',
+        'requires_reference_kind': 'genomic',
+    },
+    'c.265C>T': {
+        'position_type':    'cdna',
+        'cDNA_position':    265,
+        'exon':             2,
+        'ref_base':         'C',
+        'alt_base':         'T',
+        'antigen_axis':     'B_strength',
+        'ref_call':         'normal',
+        'alt_call':         'weak',
+        'role':             'modifier',
+        'significance':     'p.Arg89Cys - FY*X (weak FYB expression)',
+        'reference':        'ISBT 008 v6.4 (FY*02M.01)',
+    },
+}
+
+
+# ─── IUPAC decode (same convention as kel / rhce / rhd analyzers) ────────────
+IUPAC_DECODE = {
+    'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'U': 'T',
+    'R': 'AG', 'Y': 'CT', 'S': 'CG', 'W': 'AT', 'K': 'GT', 'M': 'AC',
+    'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG',
+    'N': 'ACGT',
+}
+
+
+# ─── Quality gates (mirror kel_analyzer for behavioural parity) ──────────────
+MIN_IDENTITY_FOR_CALLING = 85.0
+SNP_LOCAL_WINDOW_HALF = 50
+SNP_LOCAL_WINDOW_MIN_BASES = 30
+MIN_LOCAL_IDENTITY_FOR_CALLING = 85.0
+SNP_PROBE_HALF = 50
+SNP_PROBE_MIN_BASES = 60
+
+
+class FYReferenceMissingError(RuntimeError):
+    """Raised when no FY reference file is available."""
+
+
+class FYAnalyzer:
+    """Duffy (FY) blood group analyzer covering three diagnostic SNPs.
+
+    See module docstring for the SNP scope and the rationale for needing a
+    genomic reference if the GATA promoter SNP is to be callable.
+
+    Use ``analyze_single_read(query_seq)`` for one read or ``analyze(reads)``
+    for multi-read consensus voting.
+    """
+
+    def __init__(
+        self,
+        gb_path: Optional[str] = None,
+        fasta_path: Optional[str] = None,
+        reference_seq: Optional[str] = None,
+    ):
+        self.reference_seq: Optional[str] = None
+        self.reference_kind: Optional[str] = None  # 'cdna' or 'genomic'
+        self.exon_map: list = []
+        self.cds_start_genomic: Optional[int] = None
+        self.cdna_offset: int = 0
+        self._aligner = self._build_aligner()
+
+        if reference_seq is not None:
+            self.reference_seq = str(reference_seq).upper()
+            self.reference_kind = 'cdna'
+            self.cdna_offset = self._detect_cds_start_in_mrna(self.reference_seq)
+            return
+
+        gb = Path(gb_path) if gb_path else FY_GENBANK_PATH
+        fa = Path(fasta_path) if fasta_path else FY_FASTA_PATH
+
+        if gb.exists():
+            self._load_genbank(gb)
+        elif fa.exists():
+            self._load_fasta(fa)
+        # else: stay unloaded — analyze_* raises with download guidance.
+
+    # ─── Reference loading ───────────────────────────────────────────────
+    def _load_genbank(self, path: Path) -> None:
+        record = SeqIO.read(str(path), "genbank")
+        self.reference_seq = str(record.seq).upper()
+        self.reference_kind = 'genomic'
+
+        exons = []
+        cds_start = None
+        for feature in record.features:
+            if feature.type == "exon":
+                start = int(feature.location.start)
+                end = int(feature.location.end)
+                number = feature.qualifiers.get("number", [None])[0]
+                try:
+                    number = int(number) if number is not None else None
+                except (TypeError, ValueError):
+                    number = None
+                exons.append((start, end, number))
+            elif feature.type == "CDS" and cds_start is None:
+                cds_start = int(feature.location.start)
+
+        exons.sort(key=lambda e: e[0])
+        for i, (s, e, n) in enumerate(exons):
+            if n is None:
+                exons[i] = (s, e, i + 1)
+        self.exon_map = exons
+        self.cds_start_genomic = cds_start
+
+    def _load_fasta(self, path: Path) -> None:
+        record = next(SeqIO.parse(str(path), "fasta"))
+        self.reference_seq = str(record.seq).upper()
+        self.reference_kind = 'cdna'
+        self.cdna_offset = self._detect_cds_start_in_mrna(self.reference_seq)
+
+    @staticmethod
+    def _detect_cds_start_in_mrna(seq: str) -> int:
+        """Return the 0-based mRNA index of the ATG start codon for ACKR1.
+
+        ACKR1 protein begins M-G-N-C-L-H-R-A-E-L (UniProt Q16570), so the start
+        codon context in the mRNA is `ATGGGCAACTGCCT`. Falls back to the first
+        ATG if the specific context is not found.
+        """
+        fy_context = seq.find('ATGGGCAACTGCCT')
+        if fy_context >= 0:
+            return fy_context
+        first_atg = seq.find('ATG')
+        return first_atg if first_atg >= 0 else 0
+
+    def is_loaded(self) -> bool:
+        return self.reference_seq is not None
+
+    def _require_reference(self) -> None:
+        if not self.is_loaded():
+            raise FYReferenceMissingError(
+                "FY reference not found. Supply one of:\n"
+                f"  - GenBank (genomic, REQUIRED for GATA SNP): {FY_GENBANK_PATH}\n"
+                f"  - FASTA (cDNA, GATA SNP will be uncoverable):  {FY_FASTA_PATH}\n"
+                "See utils/data/FY_REFERENCE_README.md for download instructions."
+            )
+
+    # ─── Position translation ────────────────────────────────────────────
+    def _position_to_ref_index(self, snp_info: dict) -> Optional[int]:
+        """Map a SNP's annotated position to a 0-based index in the loaded
+        reference, accommodating both coding (cdna) and promoter SNPs.
+
+        Returns None when the SNP cannot be located in the current reference
+        (e.g. promoter SNP against a cDNA-only reference).
+        """
+        ptype = snp_info.get('position_type', 'cdna')
+
+        if ptype == 'promoter':
+            if self.reference_kind != 'genomic' or self.cds_start_genomic is None:
+                return None
+            idx = self.cds_start_genomic + int(snp_info['promoter_offset'])
+            if 0 <= idx < len(self.reference_seq):
+                return idx
+            return None
+
+        # 'cdna' path — identical to KELAnalyzer._cdna_to_ref_index.
+        cdna_pos = int(snp_info['cDNA_position'])
+
+        if self.reference_kind == 'cdna':
+            idx = (cdna_pos - 1) + self.cdna_offset
+            if 0 <= idx < len(self.reference_seq):
+                return idx
+            return None
+
+        remaining = cdna_pos
+        for start, end, _ in self.exon_map:
+            exon_len = end - start
+            exon_cds_start = start
+            exon_cds_len = exon_len
+
+            if self.cds_start_genomic is not None and start < self.cds_start_genomic < end:
+                exon_cds_start = self.cds_start_genomic
+                exon_cds_len = end - self.cds_start_genomic
+            elif self.cds_start_genomic is not None and end <= self.cds_start_genomic:
+                continue
+
+            if remaining <= exon_cds_len:
+                return exon_cds_start + (remaining - 1)
+            remaining -= exon_cds_len
+
+        return None
+
+    # ─── Alignment ────────────────────────────────────────────────────────
+    @staticmethod
+    def _build_aligner() -> PairwiseAligner:
+        aligner = PairwiseAligner()
+        aligner.mode = 'local'
+        aligner.match_score = 2
+        aligner.mismatch_score = -1
+        aligner.open_gap_score = -5
+        aligner.extend_gap_score = -0.5
+        return aligner
+
+    def _align(self, query_seq: str, strand: str = 'forward'):
+        seq = query_seq if strand == 'forward' else str(Seq(query_seq).reverse_complement())
+        try:
+            alignments = self._aligner.align(self.reference_seq, seq)
+            best = alignments[0]
+        except (ValueError, IndexError, OverflowError):
+            return None
+        return {
+            'identity': self._identity(best),
+            'score': best.score,
+            'strand': strand,
+            'alignment': best,
+            'aligned_query': seq,
+        }
+
+    @staticmethod
+    def _identity(alignment) -> float:
+        ref_a, query_a = str(alignment[0]), str(alignment[1])
+        matches = aligned = 0
+        for r, q in zip(ref_a, query_a):
+            if r == '-' or q == '-':
+                continue
+            aligned += 1
+            if r == q:
+                matches += 1
+        return (matches / aligned * 100.0) if aligned else 0.0
+
+    @staticmethod
+    def _ref_index_to_alignment_column(alignment, ref_index_0based: int) -> Optional[int]:
+        ref_aligned = str(alignment[0])
+        query_aligned = str(alignment[1])
+        try:
+            cursor = int(alignment.coordinates[0][0])
+        except (AttributeError, IndexError, TypeError):
+            cursor = 0
+        for col, ref_char in enumerate(ref_aligned):
+            if ref_char == '-':
+                continue
+            if cursor == ref_index_0based:
+                if query_aligned[col] == '-':
+                    return None
+                return col
+            cursor += 1
+        return None
+
+    # ─── SNP genotyping ──────────────────────────────────────────────────
+    @staticmethod
+    def _probe_alignment_identity(alignment) -> tuple:
+        ref_aligned = str(alignment[0])
+        query_aligned = str(alignment[1])
+        matches = total = 0
+        for r, q in zip(ref_aligned, query_aligned):
+            if r == '-' or q == '-':
+                continue
+            total += 1
+            if r.upper() == q.upper():
+                matches += 1
+        if total == 0:
+            return 0.0, 0
+        return (matches / total * 100.0), total
+
+    def _call_snp_from_column(
+        self,
+        alignment,
+        col: int,
+        snp_info: dict,
+        window_pct: float,
+        window_n: int,
+    ) -> dict:
+        ref_aligned = str(alignment[0])
+        query_aligned = str(alignment[1])
+        ref_b_at_col = ref_aligned[col].upper()
+        query_b = query_aligned[col].upper()
+
+        meta = {
+            'local_window_identity': round(window_pct, 1),
+            'local_window_bases':    window_n,
+        }
+
+        if ref_b_at_col != snp_info['ref_base']:
+            return {
+                'covered':  True,
+                'call':     'no_call',
+                'reason':   (f"ref_base mismatch: reference has {ref_b_at_col}, "
+                             f"expected {snp_info['ref_base']}"),
+                **meta,
+            }
+
+        if query_b in ('-', 'N'):
+            return {'covered': True, 'call': 'no_call', 'reason': 'gap or N in query', **meta}
+
+        decoded = IUPAC_DECODE.get(query_b, query_b)
+        ref_b = snp_info['ref_base']
+        alt_b = snp_info['alt_base']
+
+        if len(decoded) == 1 and decoded == ref_b:
+            zygosity, call = 'hom_ref', snp_info['ref_call']
+        elif len(decoded) == 1 and decoded == alt_b:
+            zygosity, call = 'hom_alt', snp_info['alt_call']
+        elif len(decoded) == 2 and ref_b in decoded and alt_b in decoded:
+            zygosity = 'het'
+            call = f"{snp_info['ref_call']}/{snp_info['alt_call']}"
+        else:
+            return {
+                'covered':  True,
+                'call':     'no_call',
+                'reason':   f'unexpected base {query_b} (decoded={decoded})',
+                **meta,
+            }
+
+        return {
+            'covered':       True,
+            'call':          call,
+            'zygosity':      zygosity,
+            'query_base':    query_b,
+            'ref_base':      ref_b,
+            'alt_base':      alt_b,
+            'antigen_axis':  snp_info['antigen_axis'],
+            'role':          snp_info['role'],
+            'exon':          snp_info.get('exon'),
+            'cDNA_position': snp_info.get('cDNA_position'),
+            'significance':  snp_info['significance'],
+            **meta,
+        }
+
+    def _genotype_snp_via_probe(self, query_seq: str, snp_info: dict) -> dict:
+        """Per-SNP genotyping by aligning a small reference probe vs. the read.
+
+        Returns an uncoverable result with a clear reason when the SNP cannot
+        be located in the current reference (e.g. GATA promoter SNP against a
+        cDNA-only reference).
+        """
+        ref_index = self._position_to_ref_index(snp_info)
+        if ref_index is None:
+            if snp_info.get('position_type') == 'promoter':
+                return {
+                    'covered': False,
+                    'reason': ('promoter SNP requires a genomic reference '
+                               'with promoter coverage'),
+                }
+            return {'covered': False, 'reason': 'position outside reference'}
+
+        lo = max(0, ref_index - SNP_PROBE_HALF)
+        hi = min(len(self.reference_seq), ref_index + SNP_PROBE_HALF + 1)
+        probe = self.reference_seq[lo:hi]
+        snp_offset_in_probe = ref_index - lo
+
+        best = None
+        for strand_name, q in (
+            ('forward', query_seq),
+            ('reverse', str(Seq(query_seq).reverse_complement())),
+        ):
+            try:
+                aln = self._aligner.align(probe, q)[0]
+            except (ValueError, IndexError, OverflowError):
+                continue
+            ident, n = self._probe_alignment_identity(aln)
+            if best is None or ident > best['identity']:
+                best = {'alignment': aln, 'identity': ident, 'n': n, 'strand': strand_name}
+
+        if best is None:
+            return {'covered': False, 'reason': 'probe produced no alignment'}
+        if best['n'] < SNP_PROBE_MIN_BASES:
+            return {
+                'covered':                False,
+                'reason':                 f'probe alignment too short ({best["n"]} aligned bases)',
+                'local_window_identity':  round(best['identity'], 1),
+                'local_window_bases':     best['n'],
+            }
+        if best['identity'] < MIN_LOCAL_IDENTITY_FOR_CALLING:
+            return {
+                'covered':                True,
+                'call':                   'no_call',
+                'reason':                 (f'probe identity {best["identity"]:.1f}% '
+                                           f'< {MIN_LOCAL_IDENTITY_FOR_CALLING}%'),
+                'local_window_identity':  round(best['identity'], 1),
+                'local_window_bases':     best['n'],
+            }
+
+        col = self._ref_index_to_alignment_column(best['alignment'], snp_offset_in_probe)
+        if col is None:
+            return {
+                'covered':                False,
+                'reason':                 'SNP position outside probe alignment or in query gap',
+                'local_window_identity':  round(best['identity'], 1),
+                'local_window_bases':     best['n'],
+            }
+
+        result = self._call_snp_from_column(
+            best['alignment'], col, snp_info, best['identity'], best['n']
+        )
+        result['probe_strand'] = best['strand']
+        return result
+
+    # ─── Public single-read pipeline ─────────────────────────────────────
+    def analyze_single_read(self, query_seq: str, read_id: Optional[str] = None) -> dict:
+        """Analyze one read against the FY reference. Same return shape as
+        KEL/RHCE so the UI layer renders it consistently."""
+        self._require_reference()
+
+        query_str = str(query_seq).upper()
+        query_length = len(query_str)
+
+        forward = self._align(query_str, 'forward')
+        reverse = self._align(query_str, 'reverse')
+
+        if forward is None and reverse is None:
+            return {
+                'read_id':         read_id,
+                'query_length':    query_length,
+                'strand':          None,
+                'identity':        0.0,
+                'score':           0.0,
+                'reference_kind':  self.reference_kind,
+                'snp_calls':       {},
+                'callable':        False,
+                'trusted_snps':    0,
+                'reason':          'No alignment produced',
+            }
+
+        best = max(
+            (a for a in (forward, reverse) if a is not None),
+            key=lambda a: a['identity'],
+        )
+
+        callable_read = best['identity'] >= MIN_IDENTITY_FOR_CALLING
+        snp_calls: dict = {
+            snp_name: self._genotype_snp_via_probe(query_str, snp_info)
+            for snp_name, snp_info in FY_DIAGNOSTIC_SNPS.items()
+        }
+        trusted_snps = sum(
+            1 for c in snp_calls.values()
+            if c.get('covered') and c.get('call') and c.get('call') != 'no_call'
+        )
+
+        reason = (
+            f"Read aligned at {best['identity']:.1f}% identity ({best['strand']}); "
+            f"{trusted_snps} diagnostic SNP(s) cleared the probe-identity gate."
+        )
+
+        return {
+            'read_id':         read_id,
+            'query_length':    query_length,
+            'strand':          best['strand'],
+            'identity':        round(best['identity'], 2),
+            'score':           round(best['score'], 2),
+            'reference_kind':  self.reference_kind,
+            'snp_calls':       snp_calls,
+            'callable':        callable_read,
+            'trusted_snps':    trusted_snps,
+            'reason':          reason,
+        }
+
+    # ─── Multi-read consensus ────────────────────────────────────────────
+    def analyze(self, reads) -> dict:
+        """ISBT-style multi-read FY pipeline. Accepts a single sequence
+        string, a list of strings, or a list of (read_id, sequence) tuples.
+        """
+        self._require_reference()
+
+        normalized = self._normalize_reads(reads)
+        per_read = [
+            self.analyze_single_read(seq, read_id=rid)
+            for rid, seq in normalized
+        ]
+
+        snp_consensus = self._consensus_snp_calls(per_read)
+        a_b_axis = self._call_antigen_axis(snp_consensus, 'A/B')
+        gata_call = self._call_modifier(snp_consensus, '-67T>C (GATA)')
+        fy_x_call = self._call_modifier(snp_consensus, 'c.265C>T')
+        phenotype_block = self._phenotype_and_alleles(a_b_axis, gata_call, fy_x_call)
+
+        callable_reads = [r for r in per_read if r['callable']]
+        reads_with_trusted_snps = [r for r in per_read if r.get('trusted_snps', 0) > 0]
+        no_calls = [
+            snp for snp, cons in snp_consensus.items()
+            if cons['consensus'] == 'no_call' and FY_DIAGNOSTIC_SNPS[snp]['role'] == 'primary'
+        ]
+
+        return {
+            'phenotype':               phenotype_block['phenotype'],
+            'allele_options':          phenotype_block['allele_options'],
+            'a_b_call':                a_b_axis,
+            'gata_call':               gata_call,
+            'fy_x_call':               fy_x_call,
+            'snp_consensus':           snp_consensus,
+            'no_calls_primary':        no_calls,
+            'overall_confidence':      a_b_axis['confidence'],
+            'reads_total':             len(per_read),
+            'reads_callable':          len(callable_reads),
+            'reads_with_trusted_snps': len(reads_with_trusted_snps),
+            'per_read_details':        per_read,
+            'reason':                  phenotype_block['reason'],
+        }
+
+    @staticmethod
+    def _normalize_reads(reads) -> list:
+        if isinstance(reads, str):
+            return [('read_1', reads)]
+        if isinstance(reads, (list, tuple)):
+            out = []
+            for i, item in enumerate(reads, 1):
+                if isinstance(item, str):
+                    out.append((f'read_{i}', item))
+                elif isinstance(item, (list, tuple)) and len(item) == 2:
+                    rid, seq = item
+                    out.append((str(rid) if rid is not None else f'read_{i}', seq))
+                else:
+                    raise ValueError(
+                        f"Unsupported read entry at index {i-1}: expected str or (id, seq)"
+                    )
+            return out
+        raise ValueError("reads must be a string, list of strings, or list of (id, seq) tuples")
+
+    @staticmethod
+    def _consensus_snp_calls(per_read_results: list) -> dict:
+        """Vote on each diagnostic SNP across reads. Identical rules to KEL."""
+        consensus: dict = {}
+
+        for snp_name in FY_DIAGNOSTIC_SNPS:
+            covering = []
+            for read in per_read_results:
+                call = read['snp_calls'].get(snp_name)
+                if not call or not call.get('covered'):
+                    continue
+                if call.get('call') == 'no_call':
+                    continue
+                covering.append({
+                    'read_id':    read['read_id'],
+                    'zygosity':   call['zygosity'],
+                    'call':       call['call'],
+                    'query_base': call.get('query_base'),
+                })
+
+            if not covering:
+                consensus[snp_name] = {
+                    'consensus':        'no_call',
+                    'confidence':       'NONE',
+                    'reads_covering':   0,
+                    'votes':            {},
+                    'supporting_reads': [],
+                    'discordant_reads': [],
+                }
+                continue
+
+            votes: dict = {}
+            for c in covering:
+                votes[c['zygosity']] = votes.get(c['zygosity'], 0) + 1
+
+            top_zygosity, top_count = max(votes.items(), key=lambda kv: kv[1])
+            tied = [z for z, n in votes.items() if n == top_count]
+            n_reads = len(covering)
+
+            supporting = [c for c in covering if c['zygosity'] == top_zygosity]
+            discordant = [c for c in covering if c['zygosity'] != top_zygosity]
+            consensus_call = supporting[0]['call']
+
+            if len(tied) > 1:
+                confidence = 'LOW'
+            elif n_reads >= 2 and top_count == n_reads:
+                confidence = 'HIGH'
+            elif n_reads >= 2 and top_count > n_reads / 2:
+                confidence = 'MEDIUM'
+            elif n_reads == 1:
+                confidence = 'MEDIUM'
+            else:
+                confidence = 'LOW'
+
+            consensus[snp_name] = {
+                'consensus':        top_zygosity,
+                'call':             consensus_call,
+                'confidence':       confidence,
+                'reads_covering':   n_reads,
+                'votes':            votes,
+                'supporting_reads': [c['read_id'] for c in supporting],
+                'discordant_reads': [c['read_id'] for c in discordant],
+            }
+
+        return consensus
+
+    @staticmethod
+    def _call_antigen_axis(snp_consensus: dict, axis: str) -> dict:
+        """Combine the primary SNP on one axis into a single genotype call."""
+        primary_snps = [
+            name for name, info in FY_DIAGNOSTIC_SNPS.items()
+            if info['antigen_axis'] == axis and info['role'] == 'primary'
+        ]
+        primary_name = primary_snps[0] if primary_snps else None
+        primary = snp_consensus.get(primary_name) if primary_name else None
+
+        if not primary or primary['consensus'] == 'no_call':
+            return {
+                'axis':            axis,
+                'genotype':        None,
+                'confidence':      'NONE',
+                'primary_snp':     primary_name,
+                'supporting_snps': [],
+                'discordant_snps': [],
+                'reason':          f'Primary marker {primary_name} not callable',
+            }
+
+        # A/B genotype mapping (ref allele = FY*A, alt allele = FY*B).
+        genotype = {'hom_ref': 'AA', 'het': 'AB', 'hom_alt': 'BB'}[primary['consensus']]
+
+        return {
+            'axis':            axis,
+            'genotype':        genotype,
+            'confidence':      primary['confidence'],
+            'primary_snp':     primary_name,
+            'supporting_snps': [primary_name],
+            'discordant_snps': [],
+            'reason':          f'Primary {primary_name} = {primary["consensus"]} ({primary["confidence"]})',
+        }
+
+    @staticmethod
+    def _call_modifier(snp_consensus: dict, snp_name: str) -> dict:
+        """Thin wrapper that surfaces a modifier SNP's consensus call.
+
+        Returns a NONE-confidence stub when the SNP couldn't be called (e.g.
+        GATA SNP against a cDNA reference). Phenotype logic treats a NONE
+        call as 'modifier inactive' rather than 'sample is silenced'.
+        """
+        cons = snp_consensus.get(snp_name)
+        if not cons or cons['consensus'] == 'no_call':
+            return {
+                'snp':        snp_name,
+                'consensus':  None,
+                'confidence': 'NONE',
+                'reason':     f'{snp_name} not callable in this reference / data',
+            }
+        return {
+            'snp':        snp_name,
+            'consensus':  cons['consensus'],
+            'call':       cons.get('call'),
+            'confidence': cons['confidence'],
+        }
+
+    @staticmethod
+    def _phenotype_and_alleles(a_b_axis: dict, gata: dict, fy_x: dict) -> dict:
+        """Combine A/B genotype + GATA modifier + FY*X modifier into a
+        phenotype label and ISBT haplotype option(s).
+
+        Phase-ambiguity handling: when GATA is heterozygous and A/B is also
+        heterozygous, the GATA mutation could lie in cis with FY*A or with
+        FY*B — Sanger genotyping cannot phase the two. Both options are
+        returned with a phase-ambiguity flag.
+        """
+        ab_geno = a_b_axis['genotype']
+
+        if ab_geno is None:
+            return {
+                'phenotype':      'Indeterminate',
+                'allele_options': [],
+                'reason':         f"A/B: {a_b_axis['reason']}",
+            }
+
+        gata_state = gata['consensus']  # 'hom_ref' | 'het' | 'hom_alt' | None
+        fy_x_state = fy_x['consensus']  # 'hom_ref' | 'het' | 'hom_alt' | None
+
+        weak_b = fy_x_state in ('het', 'hom_alt')
+
+        # 1) Homozygous GATA-null -> ACKR1 silenced on both haplotypes.
+        if gata_state == 'hom_alt':
+            return {
+                'phenotype':      'Fy(a-b-)',
+                'allele_options': [{
+                    'haplotypes': 'FY*0/FY*0',
+                    'isbt':       'FY*02N.01 / FY*02N.01',
+                    'serology':   'Fy(a-b-) — erythroid silenced (GATA homozygous)',
+                }],
+                'reason': ('GATA -67 homozygous (T/T -> C/C); both haplotypes '
+                           'erythroid-silenced regardless of A/B genotype.'),
+            }
+
+        # 2) GATA reference (or uncallable) -> A/B genotype determines phenotype.
+        if gata_state in (None, 'hom_ref'):
+            ab_map = {
+                'AA': ('FY*A',  'FY*A',  'FY*01/FY*01', 'Fy(a+b-)'),
+                'AB': ('FY*A',  'FY*B',  'FY*01/FY*02', 'Fy(a+b+)'),
+                'BB': ('FY*B',  'FY*B',  'FY*02/FY*02', 'Fy(a-b+)'),
+            }
+            a1, a2, isbt, serology = ab_map[ab_geno]
+            note = ''
+            if weak_b and 'B' in ab_geno:
+                serology = serology.replace('b+', 'b+ (weak, FY*X)')
+                note = ' FY*X (c.265C>T) variant present — FYB expression weak.'
+
+            gata_note = ('' if gata_state == 'hom_ref'
+                         else ' GATA SNP not callable in this reference.')
+
+            return {
+                'phenotype':      serology.split(' ', 1)[0]  # leading Fy(...) label
+                                  if serology.startswith('Fy(') else serology,
+                'allele_options': [{
+                    'haplotypes': f'{a1}/{a2}',
+                    'isbt':       isbt,
+                    'serology':   serology,
+                }],
+                'reason': (f'A/B = {ab_geno} ({a_b_axis["confidence"]}); '
+                           f'GATA = {"reference" if gata_state == "hom_ref" else "unknown"}.'
+                           f'{note}{gata_note}'),
+            }
+
+        # 3) GATA heterozygous -> one haplotype erythroid-silenced; phase
+        #    relative to A/B is unresolvable by Sanger.
+        weak_tag = ' (weak, FY*X)' if weak_b else ''
+
+        if ab_geno == 'AA':
+            # Both haplotypes carry FY*A; one is silenced — net Fy(a+b-).
+            return {
+                'phenotype':      'Fy(a+b-)',
+                'allele_options': [{
+                    'haplotypes': 'FY*A/FY*A,GATA',
+                    'isbt':       'FY*01 / FY*01N.01',
+                    'serology':   'Fy(a+b-) — one FY*A silenced by GATA mutation',
+                }],
+                'reason': ('A/B homozygous FY*A; GATA heterozygous — one FY*A '
+                           'haplotype erythroid-silenced. Net phenotype Fy(a+b-) '
+                           'with reduced Fya copy number.'),
+            }
+
+        if ab_geno == 'BB':
+            return {
+                'phenotype':      f'Fy(a-b+{weak_tag})'.replace(' ', ''),
+                'allele_options': [{
+                    'haplotypes': 'FY*B/FY*B,GATA',
+                    'isbt':       'FY*02 / FY*02N.01',
+                    'serology':   f'Fy(a-b+{weak_tag}) — one FY*B silenced by GATA',
+                }],
+                'reason': ('A/B homozygous FY*B; GATA heterozygous — one FY*B '
+                           'haplotype erythroid-silenced. Net phenotype Fy(a-b+) '
+                           'with reduced Fyb copy number.'
+                           + (' FY*X also present.' if weak_b else '')),
+            }
+
+        # ab_geno == 'AB' with GATA het -> phase ambiguous.
+        return {
+            'phenotype':      'Fy(a+b-) or Fy(a-b+) (phase ambiguous)',
+            'allele_options': [
+                {
+                    'haplotypes': 'FY*A,GATA / FY*B',
+                    'isbt':       'FY*01N.01 / FY*02',
+                    'serology':   f'Fy(a-b+{weak_tag}) — GATA on FY*A haplotype',
+                },
+                {
+                    'haplotypes': 'FY*A / FY*B,GATA',
+                    'isbt':       'FY*01 / FY*02N.01',
+                    'serology':   f'Fy(a+b-) — GATA on FY*B haplotype'
+                                  + (' (FY*X co-occurs)' if weak_b else ''),
+                },
+            ],
+            'reason': ('A/B heterozygous and GATA heterozygous: the GATA-null '
+                       'mutation could be in cis with FY*A or FY*B. Sanger '
+                       'genotyping cannot phase the two — both options listed.'
+                       + (' FY*X (c.265C>T) variant present.' if weak_b else '')),
+        }

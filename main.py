@@ -12,8 +12,15 @@ import utils.ab1_analyzer as ab1_utils
 import utils.abo_identifier as abo_utils
 from utils.rhd_analyzer import RHDAnalyzer
 from utils.rhce_analyzer import RHCEAnalyzer, RHCEReferenceMissingError
+from utils.kel_analyzer import KELAnalyzer, KELReferenceMissingError
+from utils.fy_analyzer import FYAnalyzer, FYReferenceMissingError
+from utils.jk_analyzer import JKAnalyzer, JKReferenceMissingError
+from utils.h_analyzer import HAnalyzer, HReferenceMissingError
+from utils.mns_analyzer import MNSAnalyzer, MNSReferenceMissingError
+from utils.di_analyzer import DIAnalyzer, DIReferenceMissingError
 from utils.isbt_handler import ISBTDataHandler
 from utils.bloodgroup import get_system, get_available_system_keys
+from utils.bloodgroup.router import route_filename
 
 import plotly.graph_objects as go
 import itertools
@@ -542,6 +549,10 @@ def process_rhd_ab1_files(rhd_ab1_files, q_threshold=20, window=10, het_ratio=0.
 
             trace['seq'] = ''.join(trimmed_seq)
             trace['filename'] = getattr(ab1_file, 'name', 'unknown')
+            # Per-base Phred quality aligned to the trimmed sequence. Lets
+            # downstream analyzers apply a stricter Q-score gate at each
+            # SNP column without re-doing AB1 parsing.
+            trace['quality_trimmed'] = list(qual[left:right])
             trace['qc'] = {
                 'q_threshold': q_threshold,
                 'window': window,
@@ -997,6 +1008,29 @@ st.title("🧬 ABO blood group analysis")
 
 # Upload section
 # with st.sidebar:
+
+# ─── Unified auto-detect upload ──────────────────────────────────────────
+# One uploader that routes each file to its blood-group system by filename
+# pattern (RHCE, RHD, KEL56, FY12, JK78, MIA234, DI1819, etc.). Routed
+# reads are appended to the existing per-system input lists below, so the
+# downstream pipeline is unchanged. Manual per-system uploaders remain as
+# an override path.
+st.sidebar.markdown("### 🚀 Auto-detect Upload (all systems)")
+unified_ab1_files = st.sidebar.file_uploader(
+    "Drop AB1 files of any blood-group amplicon",
+    type=["ab1"], accept_multiple_files=True,
+    key="unified_ab1",
+    help=("Filenames are matched against amplicon-naming conventions "
+          "(RHCE45, RHD1, KEL56, FY12, JK78, MIA234, DI1819, ...). "
+          "Unrecognized names are flagged 'unrouted' and skipped."))
+unified_fasta_files = st.sidebar.file_uploader(
+    "Drop FASTA files of any blood-group amplicon",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    key="unified_fasta",
+    help=("Same routing rules as the AB1 uploader above. Files for ABO/RHD/"
+          "RHCE/Kell/Duffy/Kidd/H/MNS/Diego are auto-detected and dispatched."))
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 🅰️🅱️ ABO Inputs")
 fwd_ab1 = st.sidebar.file_uploader(
     "Upload ABO AB1 file",
@@ -1030,6 +1064,85 @@ rhce_fasta_files = st.sidebar.file_uploader(
     type=["fasta", "fa", "fas"], accept_multiple_files=True,
     help="Multiple FASTA reads recommended for international-standard multi-read consensus voting.")
 
+st.sidebar.markdown("### 🩸 Kell Inputs")
+kel_ab1_files = st.sidebar.file_uploader(
+    "Upload Kell AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help="AB1 chromatograms covering KEL exon 6 (K/k diagnostic region, c.578C>T).")
+
+kel_fasta_files = st.sidebar.file_uploader(
+    "Upload Kell FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help="FASTA reads covering KEL exon 6. Multiple reads enable consensus voting.")
+
+st.sidebar.markdown("### 🩸 Duffy Inputs")
+fy_ab1_files = st.sidebar.file_uploader(
+    "Upload Duffy AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help=("AB1 chromatograms covering Duffy exon 2 (c.125G>A FYA/FYB, c.265C>T "
+          "FY*X) and/or the promoter (-67T>C GATA, requires genomic amplicon)."))
+
+fy_fasta_files = st.sidebar.file_uploader(
+    "Upload Duffy FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help=("FASTA reads covering the Duffy diagnostic SNPs. Multiple reads enable "
+          "consensus voting. Promoter SNP (-67T>C) needs a genomic amplicon."))
+
+st.sidebar.markdown("### 🩸 Kidd Inputs")
+jk_ab1_files = st.sidebar.file_uploader(
+    "Upload Kidd AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help=("AB1 chromatograms covering Kidd exon 9 (c.838G>A JKA/JKB, c.871T>C "
+          "Asian-null) and/or intron 5 (c.342-1G>A Polynesian-null splice, "
+          "requires genomic amplicon)."))
+
+jk_fasta_files = st.sidebar.file_uploader(
+    "Upload Kidd FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help=("FASTA reads covering the Kidd diagnostic SNPs. Multiple reads enable "
+          "consensus voting. Splice SNP (c.342-1) needs a genomic amplicon."))
+
+st.sidebar.markdown("### 🩸 H Inputs")
+h_ab1_files = st.sidebar.file_uploader(
+    "Upload H AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help=("AB1 chromatograms covering FUT1 exon 4 (c.460T>C h2, c.586C>T "
+          "nonsense, c.725T>G Indian Bombay). Detects Bombay (Oh) and "
+          "Para-Bombay carriers."))
+
+h_fasta_files = st.sidebar.file_uploader(
+    "Upload H FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help=("FASTA reads covering the FUT1 diagnostic SNPs. Multiple reads "
+          "enable consensus voting."))
+
+st.sidebar.markdown("### 🩸 MNS Inputs")
+mns_ab1_files = st.sidebar.file_uploader(
+    "Upload MNS AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help=("AB1 chromatograms covering GYPA exon 2 (c.59C>T, M/N) and/or "
+          "GYPB exon 3 (c.143C>T, S/s). Drop reads from either gene — the "
+          "analyzer dispatches per-SNP."))
+
+mns_fasta_files = st.sidebar.file_uploader(
+    "Upload MNS FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help=("FASTA reads for GYPA and/or GYPB. Multiple reads enable "
+          "consensus voting; both genes can be uploaded together."))
+
+st.sidebar.markdown("### 🩸 Diego Inputs")
+di_ab1_files = st.sidebar.file_uploader(
+    "Upload Diego AB1 file(s)",
+    type=["ab1"], accept_multiple_files=True,
+    help=("AB1 chromatograms covering SLC4A1 exon 19 (c.2561T>C, "
+          "Di(a)/Di(b) discriminator). Lab amplicon: DI1819."))
+
+di_fasta_files = st.sidebar.file_uploader(
+    "Upload Diego FASTA file(s)",
+    type=["fasta", "fa", "fas"], accept_multiple_files=True,
+    help=("FASTA reads covering SLC4A1 c.2561. Multiple reads enable "
+          "consensus voting."))
+
 exon_start = st.sidebar.number_input(
     "Exon start (optional)", min_value=0, value=0)
 exon_end = st.sidebar.number_input(
@@ -1054,7 +1167,7 @@ def get_cds(exon_number):
     return None, None
 
 
-def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt_handler, has_fasta, rhd_reference_seq=None, rhce_result=None):
+def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt_handler, has_fasta, rhd_reference_seq=None, rhce_result=None, kel_result=None, fy_result=None, jk_result=None, h_result=None, mns_result=None, di_result=None):
     """
     Generate a comprehensive final blood group summary from all analyzed systems.
 
@@ -1065,6 +1178,10 @@ def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt
         isbt_handler: ISBT handler for phenotype suggestions
         has_fasta: bool indicating whether FASTA files were uploaded
         rhce_result: optional dict from RHCEAnalyzer.analyze() with consensus result
+        kel_result: optional dict from KELAnalyzer.analyze() with consensus result
+        fy_result: optional dict from FYAnalyzer.analyze() with consensus result
+        jk_result: optional dict from JKAnalyzer.analyze() with consensus result
+        h_result:  optional dict from HAnalyzer.analyze()  with consensus result
 
     Returns:
         Dictionary with final blood group summary
@@ -1073,6 +1190,12 @@ def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt
         'abo': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'message': None},
         'rhd': {'status': 'not_analyzed', 'phenotype': None, 'alleles': [], 'variants': [], 'identity': None, 'query_length': None, 'reference_length': None, 'note': None},
         'rhce': {'status': 'not_analyzed', 'phenotype': None, 'c_e': None, 'big_E': None, 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'partial_markers': [], 'message': None},
+        'kel': {'status': 'not_analyzed', 'phenotype': None, 'k_axis': None, 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'message': None},
+        'fy':  {'status': 'not_analyzed', 'phenotype': None, 'a_b': None, 'gata': None, 'fy_x': None, 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'phase_ambiguous': False, 'message': None},
+        'jk':  {'status': 'not_analyzed', 'phenotype': None, 'a_b': None, 'null_state': None, 'null_triggers': [], 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'phase_ambiguous': False, 'message': None},
+        'h':   {'status': 'not_analyzed', 'phenotype': None, 'state': None, 'triggers_hom_alt': [], 'triggers_het': [], 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'bombay_warning': False, 'message': None},
+        'mns': {'status': 'not_analyzed', 'phenotype': None, 'm_n': None, 's_s': None, 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'phase_ambiguous': False, 'message': None},
+        'di':  {'status': 'not_analyzed', 'phenotype': None, 'genotype': None, 'allele_options': [], 'confidence': None, 'reads_callable': 0, 'reads_total': 0, 'message': None},
     }
 
     # ABO Analysis Summary
@@ -1155,6 +1278,108 @@ def generate_final_blood_group_summary(robust_summary, processed_AB1, hets, isbt
             summary['rhce']['reads_total'] = rhce_result.get('reads_total', 0)
             summary['rhce']['partial_markers'] = (rhce_result.get('big_E_call') or {}).get('partial_markers', [])
 
+    # KEL Analysis Summary - multi-read consensus
+    if kel_result is not None:
+        if kel_result.get('phenotype') == 'Indeterminate' or kel_result.get('reads_with_trusted_snps', 0) == 0:
+            summary['kel']['status'] = 'indeterminate'
+            summary['kel']['phenotype'] = 'Indeterminate'
+            summary['kel']['message'] = kel_result.get('reason')
+        else:
+            summary['kel']['status'] = 'analyzed'
+            summary['kel']['phenotype'] = kel_result.get('phenotype')
+            summary['kel']['k_axis'] = (kel_result.get('k_axis_call') or {}).get('genotype')
+            summary['kel']['allele_options'] = kel_result.get('allele_options', [])
+            summary['kel']['confidence'] = kel_result.get('overall_confidence')
+            summary['kel']['reads_callable'] = kel_result.get('reads_callable', 0)
+            summary['kel']['reads_total'] = kel_result.get('reads_total', 0)
+
+    # FY (Duffy) Analysis Summary - multi-read consensus
+    if fy_result is not None:
+        if fy_result.get('phenotype') == 'Indeterminate' or fy_result.get('reads_with_trusted_snps', 0) == 0:
+            summary['fy']['status'] = 'indeterminate'
+            summary['fy']['phenotype'] = 'Indeterminate'
+            summary['fy']['message'] = fy_result.get('reason')
+        else:
+            summary['fy']['status'] = 'analyzed'
+            summary['fy']['phenotype'] = fy_result.get('phenotype')
+            summary['fy']['a_b'] = (fy_result.get('a_b_call') or {}).get('genotype')
+            summary['fy']['gata'] = (fy_result.get('gata_call') or {}).get('consensus')
+            summary['fy']['fy_x'] = (fy_result.get('fy_x_call') or {}).get('consensus')
+            summary['fy']['allele_options'] = fy_result.get('allele_options', [])
+            summary['fy']['confidence'] = fy_result.get('overall_confidence')
+            summary['fy']['reads_callable'] = fy_result.get('reads_callable', 0)
+            summary['fy']['reads_total'] = fy_result.get('reads_total', 0)
+            summary['fy']['phase_ambiguous'] = len(fy_result.get('allele_options', [])) > 1
+
+    # JK (Kidd) Analysis Summary - multi-read consensus
+    if jk_result is not None:
+        if jk_result.get('phenotype') == 'Indeterminate' or jk_result.get('reads_with_trusted_snps', 0) == 0:
+            summary['jk']['status'] = 'indeterminate'
+            summary['jk']['phenotype'] = 'Indeterminate'
+            summary['jk']['message'] = jk_result.get('reason')
+        else:
+            summary['jk']['status'] = 'analyzed'
+            summary['jk']['phenotype'] = jk_result.get('phenotype')
+            summary['jk']['a_b'] = (jk_result.get('a_b_call') or {}).get('genotype')
+            summary['jk']['null_state'] = (jk_result.get('null_call') or {}).get('state')
+            summary['jk']['null_triggers'] = (jk_result.get('null_call') or {}).get('triggers', [])
+            summary['jk']['allele_options'] = jk_result.get('allele_options', [])
+            summary['jk']['confidence'] = jk_result.get('overall_confidence')
+            summary['jk']['reads_callable'] = jk_result.get('reads_callable', 0)
+            summary['jk']['reads_total'] = jk_result.get('reads_total', 0)
+            summary['jk']['phase_ambiguous'] = len(jk_result.get('allele_options', [])) > 1
+
+    # H (FUT1 / Bombay) Analysis Summary - multi-read consensus
+    if h_result is not None:
+        if h_result.get('phenotype') == 'Indeterminate' or h_result.get('reads_with_trusted_snps', 0) == 0:
+            summary['h']['status'] = 'indeterminate'
+            summary['h']['phenotype'] = 'Indeterminate'
+            summary['h']['message'] = h_result.get('reason')
+        else:
+            summary['h']['status'] = 'analyzed'
+            summary['h']['phenotype'] = h_result.get('phenotype')
+            summary['h']['state'] = (h_result.get('h_state_call') or {}).get('state')
+            summary['h']['triggers_hom_alt'] = (h_result.get('h_state_call') or {}).get('triggers_hom_alt', [])
+            summary['h']['triggers_het'] = (h_result.get('h_state_call') or {}).get('triggers_het', [])
+            summary['h']['allele_options'] = h_result.get('allele_options', [])
+            summary['h']['confidence'] = h_result.get('overall_confidence')
+            summary['h']['reads_callable'] = h_result.get('reads_callable', 0)
+            summary['h']['reads_total'] = h_result.get('reads_total', 0)
+            # Bombay is a transfusion-safety flag — surface it explicitly.
+            summary['h']['bombay_warning'] = summary['h']['state'] == 'bombay'
+
+    # MNS (GYPA + GYPB) Analysis Summary - multi-read consensus
+    if mns_result is not None:
+        if mns_result.get('phenotype') == 'Indeterminate' or mns_result.get('reads_with_trusted_snps', 0) == 0:
+            summary['mns']['status'] = 'indeterminate'
+            summary['mns']['phenotype'] = 'Indeterminate'
+            summary['mns']['message'] = mns_result.get('reason')
+        else:
+            summary['mns']['status'] = 'analyzed'
+            summary['mns']['phenotype'] = mns_result.get('phenotype')
+            summary['mns']['m_n'] = (mns_result.get('m_n_call') or {}).get('genotype')
+            summary['mns']['s_s'] = (mns_result.get('s_s_call') or {}).get('genotype')
+            summary['mns']['allele_options'] = mns_result.get('allele_options', [])
+            summary['mns']['confidence'] = mns_result.get('overall_confidence')
+            summary['mns']['reads_callable'] = mns_result.get('reads_callable', 0)
+            summary['mns']['reads_total'] = mns_result.get('reads_total', 0)
+            summary['mns']['phase_ambiguous'] = len(mns_result.get('allele_options', [])) > 1
+
+    # DI (Diego / SLC4A1) Analysis Summary - multi-read consensus
+    if di_result is not None:
+        if di_result.get('phenotype') == 'Indeterminate' or di_result.get('reads_with_trusted_snps', 0) == 0:
+            summary['di']['status'] = 'indeterminate'
+            summary['di']['phenotype'] = 'Indeterminate'
+            summary['di']['message'] = di_result.get('reason')
+        else:
+            summary['di']['status'] = 'analyzed'
+            summary['di']['phenotype'] = di_result.get('phenotype')
+            summary['di']['genotype'] = (di_result.get('di_axis_call') or {}).get('genotype')
+            summary['di']['allele_options'] = di_result.get('allele_options', [])
+            summary['di']['confidence'] = di_result.get('overall_confidence')
+            summary['di']['reads_callable'] = di_result.get('reads_callable', 0)
+            summary['di']['reads_total'] = di_result.get('reads_total', 0)
+
     return summary
 
 
@@ -1196,6 +1421,71 @@ def display_final_blood_group_result(summary):
     else:
         result_parts.append("*RHCE: Not analyzed*")
 
+    # KEL result
+    if summary['kel']['status'] == 'analyzed' and summary['kel']['phenotype']:
+        conf = summary['kel'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        result_parts.append(f"**Kell: {summary['kel']['phenotype']}{conf_tag}**")
+    elif summary['kel']['status'] == 'indeterminate':
+        result_parts.append("**Kell: Indeterminate**")
+    else:
+        result_parts.append("*Kell: Not analyzed*")
+
+    # FY (Duffy) result
+    if summary['fy']['status'] == 'analyzed' and summary['fy']['phenotype']:
+        conf = summary['fy'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        amb = " ⚠" if summary['fy'].get('phase_ambiguous') else ''
+        result_parts.append(f"**Duffy: {summary['fy']['phenotype']}{conf_tag}{amb}**")
+    elif summary['fy']['status'] == 'indeterminate':
+        result_parts.append("**Duffy: Indeterminate**")
+    else:
+        result_parts.append("*Duffy: Not analyzed*")
+
+    # JK (Kidd) result
+    if summary['jk']['status'] == 'analyzed' and summary['jk']['phenotype']:
+        conf = summary['jk'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        amb = " ⚠" if summary['jk'].get('phase_ambiguous') else ''
+        result_parts.append(f"**Kidd: {summary['jk']['phenotype']}{conf_tag}{amb}**")
+    elif summary['jk']['status'] == 'indeterminate':
+        result_parts.append("**Kidd: Indeterminate**")
+    else:
+        result_parts.append("*Kidd: Not analyzed*")
+
+    # H (FUT1 / Bombay) result — Bombay gets a loud 🚨 because it's a
+    # transfusion-safety issue (recipient rejects standard ABO blood).
+    if summary['h']['status'] == 'analyzed' and summary['h']['phenotype']:
+        conf = summary['h'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        bombay = " 🚨" if summary['h'].get('bombay_warning') else ''
+        result_parts.append(f"**H: {summary['h']['phenotype']}{conf_tag}{bombay}**")
+    elif summary['h']['status'] == 'indeterminate':
+        result_parts.append("**H: Indeterminate**")
+    else:
+        result_parts.append("*H: Not analyzed*")
+
+    # MNS result — phase-ambiguity (double-het MN/Ss) gets the ⚠ flag.
+    if summary['mns']['status'] == 'analyzed' and summary['mns']['phenotype']:
+        conf = summary['mns'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        amb = " ⚠" if summary['mns'].get('phase_ambiguous') else ''
+        result_parts.append(f"**MNS: {summary['mns']['phenotype']}{conf_tag}{amb}**")
+    elif summary['mns']['status'] == 'indeterminate':
+        result_parts.append("**MNS: Indeterminate**")
+    else:
+        result_parts.append("*MNS: Not analyzed*")
+
+    # Diego result — single-axis system, no phase ambiguity flag.
+    if summary['di']['status'] == 'analyzed' and summary['di']['phenotype']:
+        conf = summary['di'].get('confidence') or ''
+        conf_tag = f" ({conf})" if conf else ''
+        result_parts.append(f"**Diego: {summary['di']['phenotype']}{conf_tag}**")
+    elif summary['di']['status'] == 'indeterminate':
+        result_parts.append("**Diego: Indeterminate**")
+    else:
+        result_parts.append("*Diego: Not analyzed*")
+
     # Display the result
     final_result = " | ".join(result_parts)
 
@@ -1218,7 +1508,7 @@ def display_final_blood_group_result(summary):
 
     # Additional details in expandable section
     with st.expander("📋 Detailed Analysis Results", expanded=False):
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns(9)
 
         with col1:
             st.markdown("### ABO System")
@@ -1286,6 +1576,173 @@ def display_final_blood_group_result(summary):
                     st.caption(summary['rhce']['message'])
             else:
                 st.warning("RHCE analysis not performed")
+
+        with col4:
+            st.markdown("### Kell System")
+            if summary['kel']['status'] == 'analyzed':
+                st.success(f"Phenotype: {summary['kel']['phenotype']}")
+                if summary['kel'].get('k_axis'):
+                    st.write(f"**K/k:** {summary['kel']['k_axis']}")
+                if summary['kel'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['kel']['confidence']}")
+                if summary['kel'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['kel']['reads_callable']} callable / "
+                             f"{summary['kel']['reads_total']} total")
+                if summary['kel']['allele_options']:
+                    opt = summary['kel']['allele_options'][0]
+                    serology = opt.get('serology', '')
+                    serology_tag = f" — {serology}" if serology else ''
+                    st.info(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+            elif summary['kel']['status'] == 'indeterminate':
+                st.warning("Kell indeterminate (primary marker c.578 not callable)")
+                if summary['kel'].get('message'):
+                    st.caption(summary['kel']['message'])
+            else:
+                st.warning("Kell analysis not performed")
+
+        with col5:
+            st.markdown("### Duffy System")
+            if summary['fy']['status'] == 'analyzed':
+                st.success(f"Phenotype: {summary['fy']['phenotype']}")
+                if summary['fy'].get('a_b'):
+                    st.write(f"**FY*A/FY*B:** {summary['fy']['a_b']}")
+                if summary['fy'].get('gata'):
+                    st.write(f"**GATA -67:** {summary['fy']['gata']}")
+                if summary['fy'].get('fy_x'):
+                    st.write(f"**FY*X (c.265):** {summary['fy']['fy_x']}")
+                if summary['fy'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['fy']['confidence']}")
+                if summary['fy'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['fy']['reads_callable']} callable / "
+                             f"{summary['fy']['reads_total']} total")
+                if summary['fy']['allele_options']:
+                    if summary['fy'].get('phase_ambiguous'):
+                        st.warning("Phase-ambiguous — multiple haplotype options:")
+                    for opt in summary['fy']['allele_options']:
+                        serology = opt.get('serology', '')
+                        serology_tag = f" — {serology}" if serology else ''
+                        st.info(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+            elif summary['fy']['status'] == 'indeterminate':
+                st.warning("Duffy indeterminate (primary marker c.125 not callable)")
+                if summary['fy'].get('message'):
+                    st.caption(summary['fy']['message'])
+            else:
+                st.warning("Duffy analysis not performed")
+
+        with col6:
+            st.markdown("### Kidd System")
+            if summary['jk']['status'] == 'analyzed':
+                st.success(f"Phenotype: {summary['jk']['phenotype']}")
+                if summary['jk'].get('a_b'):
+                    st.write(f"**JK*A/JK*B:** {summary['jk']['a_b']}")
+                if summary['jk'].get('null_state'):
+                    st.write(f"**Null state:** {summary['jk']['null_state']}")
+                if summary['jk'].get('null_triggers'):
+                    triggers = ", ".join(t['snp'] for t in summary['jk']['null_triggers'])
+                    st.caption(f"Triggers: {triggers}")
+                if summary['jk'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['jk']['confidence']}")
+                if summary['jk'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['jk']['reads_callable']} callable / "
+                             f"{summary['jk']['reads_total']} total")
+                if summary['jk']['allele_options']:
+                    if summary['jk'].get('phase_ambiguous'):
+                        st.warning("Phase-ambiguous — multiple haplotype options:")
+                    for opt in summary['jk']['allele_options']:
+                        serology = opt.get('serology', '')
+                        serology_tag = f" — {serology}" if serology else ''
+                        st.info(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+            elif summary['jk']['status'] == 'indeterminate':
+                st.warning("Kidd indeterminate (primary marker c.838 not callable)")
+                if summary['jk'].get('message'):
+                    st.caption(summary['jk']['message'])
+            else:
+                st.warning("Kidd analysis not performed")
+
+        with col7:
+            st.markdown("### H System")
+            if summary['h']['status'] == 'analyzed':
+                if summary['h'].get('bombay_warning'):
+                    st.error(f"🚨 {summary['h']['phenotype']}")
+                else:
+                    st.success(f"Phenotype: {summary['h']['phenotype']}")
+                if summary['h'].get('state'):
+                    st.write(f"**State:** {summary['h']['state']}")
+                if summary['h'].get('triggers_hom_alt'):
+                    triggers = ", ".join(t['snp'] for t in summary['h']['triggers_hom_alt'])
+                    st.caption(f"Hom-alt: {triggers}")
+                if summary['h'].get('triggers_het'):
+                    triggers = ", ".join(t['snp'] for t in summary['h']['triggers_het'])
+                    st.caption(f"Het: {triggers}")
+                if summary['h'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['h']['confidence']}")
+                if summary['h'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['h']['reads_callable']} callable / "
+                             f"{summary['h']['reads_total']} total")
+                if summary['h']['allele_options']:
+                    for opt in summary['h']['allele_options']:
+                        serology = opt.get('serology', '')
+                        serology_tag = f" — {serology}" if serology else ''
+                        if summary['h'].get('bombay_warning'):
+                            st.error(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+                        else:
+                            st.info(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+            elif summary['h']['status'] == 'indeterminate':
+                st.warning("H indeterminate (no diagnostic SNPs callable)")
+                if summary['h'].get('message'):
+                    st.caption(summary['h']['message'])
+            else:
+                st.warning("H analysis not performed")
+
+        with col8:
+            st.markdown("### MNS System")
+            if summary['mns']['status'] == 'analyzed':
+                st.success(f"Phenotype: {summary['mns']['phenotype']}")
+                if summary['mns'].get('m_n'):
+                    st.write(f"**M/N:** {summary['mns']['m_n']}")
+                if summary['mns'].get('s_s'):
+                    st.write(f"**S/s:** {summary['mns']['s_s']}")
+                if summary['mns'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['mns']['confidence']}")
+                if summary['mns'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['mns']['reads_callable']} callable / "
+                             f"{summary['mns']['reads_total']} total")
+                if summary['mns']['allele_options']:
+                    if summary['mns'].get('phase_ambiguous'):
+                        st.warning("Phase-ambiguous — multiple haplotype options:")
+                    for opt in summary['mns']['allele_options']:
+                        serology = opt.get('serology', '')
+                        serology_tag = f" — {serology}" if serology else ''
+                        st.info(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+            elif summary['mns']['status'] == 'indeterminate':
+                st.warning("MNS indeterminate (no primary marker callable)")
+                if summary['mns'].get('message'):
+                    st.caption(summary['mns']['message'])
+            else:
+                st.warning("MNS analysis not performed")
+
+        with col9:
+            st.markdown("### Diego System")
+            if summary['di']['status'] == 'analyzed':
+                st.success(f"Phenotype: {summary['di']['phenotype']}")
+                if summary['di'].get('genotype'):
+                    st.write(f"**Di(a)/Di(b):** {summary['di']['genotype']}")
+                if summary['di'].get('confidence'):
+                    st.write(f"**Confidence:** {summary['di']['confidence']}")
+                if summary['di'].get('reads_total'):
+                    st.write(f"**Reads:** {summary['di']['reads_callable']} callable / "
+                             f"{summary['di']['reads_total']} total")
+                if summary['di']['allele_options']:
+                    opt = summary['di']['allele_options'][0]
+                    serology = opt.get('serology', '')
+                    serology_tag = f" — {serology}" if serology else ''
+                    st.info(f"ISBT haplotype: {opt['isbt']}{serology_tag}")
+            elif summary['di']['status'] == 'indeterminate':
+                st.warning("Diego indeterminate (primary marker c.2561 not callable)")
+                if summary['di'].get('message'):
+                    st.caption(summary['di']['message'])
+            else:
+                st.warning("Diego analysis not performed")
 
 
 # --- Main Panel ---
@@ -1504,11 +1961,72 @@ Blood Transfusion Science,<br> Faculty of Associated Medical Sciences<br>
 
 if analyze_button:
     if (not fwd_ab1 and not fasta_files and not rhd_fasta_files and not rhd_ab1_files
-            and not rhce_ab1_files and not rhce_fasta_files):
+            and not rhce_ab1_files and not rhce_fasta_files
+            and not kel_ab1_files and not kel_fasta_files
+            and not fy_ab1_files and not fy_fasta_files
+            and not jk_ab1_files and not jk_fasta_files
+            and not h_ab1_files and not h_fasta_files
+            and not mns_ab1_files and not mns_fasta_files
+            and not di_ab1_files and not di_fasta_files
+            and not unified_ab1_files and not unified_fasta_files):
         st.warning("Please upload at least one file before analyzing.")
     else:
         status_container = st.empty()
         status_container.success("Files uploaded successfully! Starting analysis...")
+
+        # ─── Unified auto-detect upload: filename-based routing ─────────
+        # Each unified file is routed by its filename to a blood-group
+        # system, then appended to that system's per-system upload list so
+        # the existing downstream processing handles it transparently. The
+        # routing_decisions log is rendered above the results banner.
+        routing_decisions: list = []   # [{filename, kind, system_or_None}]
+        _routed: dict = {
+            'ABO': {'ab1': [], 'fasta': []},
+            'RHD': {'ab1': [], 'fasta': []},
+            'RHCE': {'ab1': [], 'fasta': []},
+            'KEL': {'ab1': [], 'fasta': []},
+            'FY':  {'ab1': [], 'fasta': []},
+            'JK':  {'ab1': [], 'fasta': []},
+            'H':   {'ab1': [], 'fasta': []},
+            'MNS': {'ab1': [], 'fasta': []},
+            'DI':  {'ab1': [], 'fasta': []},
+        }
+        for _f in (unified_ab1_files or []):
+            _sys = route_filename(_f.name)
+            routing_decisions.append({
+                'filename': _f.name, 'kind': 'ab1', 'system': _sys,
+            })
+            if _sys in _routed:
+                _routed[_sys]['ab1'].append(_f)
+        for _f in (unified_fasta_files or []):
+            _sys = route_filename(_f.name)
+            routing_decisions.append({
+                'filename': _f.name, 'kind': 'fasta', 'system': _sys,
+            })
+            if _sys in _routed:
+                _routed[_sys]['fasta'].append(_f)
+
+        # Merge routed files into the per-system uploader variables so the
+        # existing downstream pipeline (process_*_files, analyzers, summary,
+        # banner, detail-view) doesn't need to know unified upload exists.
+        fwd_ab1        = list(fwd_ab1        or []) + _routed['ABO']['ab1']
+        fasta_files    = list(fasta_files    or []) + _routed['ABO']['fasta']
+        rhd_ab1_files  = list(rhd_ab1_files  or []) + _routed['RHD']['ab1']
+        rhd_fasta_files = list(rhd_fasta_files or []) + _routed['RHD']['fasta']
+        rhce_ab1_files = list(rhce_ab1_files or []) + _routed['RHCE']['ab1']
+        rhce_fasta_files = list(rhce_fasta_files or []) + _routed['RHCE']['fasta']
+        kel_ab1_files  = list(kel_ab1_files  or []) + _routed['KEL']['ab1']
+        kel_fasta_files = list(kel_fasta_files or []) + _routed['KEL']['fasta']
+        fy_ab1_files   = list(fy_ab1_files   or []) + _routed['FY']['ab1']
+        fy_fasta_files = list(fy_fasta_files or []) + _routed['FY']['fasta']
+        jk_ab1_files   = list(jk_ab1_files   or []) + _routed['JK']['ab1']
+        jk_fasta_files = list(jk_fasta_files or []) + _routed['JK']['fasta']
+        h_ab1_files    = list(h_ab1_files    or []) + _routed['H']['ab1']
+        h_fasta_files  = list(h_fasta_files  or []) + _routed['H']['fasta']
+        mns_ab1_files  = list(mns_ab1_files  or []) + _routed['MNS']['ab1']
+        mns_fasta_files = list(mns_fasta_files or []) + _routed['MNS']['fasta']
+        di_ab1_files   = list(di_ab1_files   or []) + _routed['DI']['ab1']
+        di_fasta_files = list(di_fasta_files or []) + _routed['DI']['fasta']
 
         # ABO AB1 channel -> chromatogram + heterozygote detection
         processed_AB1, hets = process_ab1_files(
@@ -1599,14 +2117,208 @@ if analyze_button:
                     seq = trace.get('seq', '')
                     if seq and len(seq) > 50:
                         rid = trace.get('filename') or f"RHCE_read_{i+1}"
-                        rhce_reads_for_summary.append((rid, seq))
+                        qual = trace.get('quality_trimmed')
+                        rhce_reads_for_summary.append((rid, seq, qual))
             if rhce_reads_for_summary:
                 try:
                     rhce_result = RHCEAnalyzer().analyze(rhce_reads_for_summary)
                 except RHCEReferenceMissingError as e:
                     rhce_error_message = str(e)
 
+        # KEL inputs — reuse the RHD AB1/FASTA processors (same trace shape).
+        kel_ab1_traces, _ = process_rhd_ab1_files(
+            kel_ab1_files, het_ratio=threshold_ratio) if kel_ab1_files else (None, None)
+        kel_fasta_traces = process_rhd_fasta_files(kel_fasta_files) if kel_fasta_files else None
+
+        kel_input_traces = []
+        if kel_ab1_traces:
+            kel_input_traces.extend(kel_ab1_traces)
+        if kel_fasta_traces:
+            kel_input_traces.extend(kel_fasta_traces)
+
+        kel_result = None
+        kel_reads_for_summary = []
+        kel_error_message = None
+        if kel_input_traces:
+            for i, trace in enumerate(kel_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"KEL_read_{i+1}"
+                        # Per-base Phred quality (AB1 inputs) or None (FASTA)
+                        qual = trace.get('quality_trimmed')
+                        kel_reads_for_summary.append((rid, seq, qual))
+            if kel_reads_for_summary:
+                try:
+                    kel_result = KELAnalyzer().analyze(kel_reads_for_summary)
+                except KELReferenceMissingError as e:
+                    kel_error_message = str(e)
+
+        # FY (Duffy) inputs — reuse the RHD AB1/FASTA processors (same trace shape).
+        fy_ab1_traces, _ = process_rhd_ab1_files(
+            fy_ab1_files, het_ratio=threshold_ratio) if fy_ab1_files else (None, None)
+        fy_fasta_traces = process_rhd_fasta_files(fy_fasta_files) if fy_fasta_files else None
+
+        fy_input_traces = []
+        if fy_ab1_traces:
+            fy_input_traces.extend(fy_ab1_traces)
+        if fy_fasta_traces:
+            fy_input_traces.extend(fy_fasta_traces)
+
+        fy_result = None
+        fy_reads_for_summary = []
+        fy_error_message = None
+        if fy_input_traces:
+            for i, trace in enumerate(fy_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"FY_read_{i+1}"
+                        qual = trace.get('quality_trimmed')
+                        fy_reads_for_summary.append((rid, seq, qual))
+            if fy_reads_for_summary:
+                try:
+                    fy_result = FYAnalyzer().analyze(fy_reads_for_summary)
+                except FYReferenceMissingError as e:
+                    fy_error_message = str(e)
+
+        # JK (Kidd) inputs — reuse the RHD AB1/FASTA processors (same trace shape).
+        jk_ab1_traces, _ = process_rhd_ab1_files(
+            jk_ab1_files, het_ratio=threshold_ratio) if jk_ab1_files else (None, None)
+        jk_fasta_traces = process_rhd_fasta_files(jk_fasta_files) if jk_fasta_files else None
+
+        jk_input_traces = []
+        if jk_ab1_traces:
+            jk_input_traces.extend(jk_ab1_traces)
+        if jk_fasta_traces:
+            jk_input_traces.extend(jk_fasta_traces)
+
+        jk_result = None
+        jk_reads_for_summary = []
+        jk_error_message = None
+        if jk_input_traces:
+            for i, trace in enumerate(jk_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"JK_read_{i+1}"
+                        qual = trace.get('quality_trimmed')
+                        jk_reads_for_summary.append((rid, seq, qual))
+            if jk_reads_for_summary:
+                try:
+                    jk_result = JKAnalyzer().analyze(jk_reads_for_summary)
+                except JKReferenceMissingError as e:
+                    jk_error_message = str(e)
+
+        # H (FUT1 / Bombay) inputs — reuse the RHD AB1/FASTA processors.
+        h_ab1_traces, _ = process_rhd_ab1_files(
+            h_ab1_files, het_ratio=threshold_ratio) if h_ab1_files else (None, None)
+        h_fasta_traces = process_rhd_fasta_files(h_fasta_files) if h_fasta_files else None
+
+        h_input_traces = []
+        if h_ab1_traces:
+            h_input_traces.extend(h_ab1_traces)
+        if h_fasta_traces:
+            h_input_traces.extend(h_fasta_traces)
+
+        h_result = None
+        h_reads_for_summary = []
+        h_error_message = None
+        if h_input_traces:
+            for i, trace in enumerate(h_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"H_read_{i+1}"
+                        qual = trace.get('quality_trimmed')
+                        h_reads_for_summary.append((rid, seq, qual))
+            if h_reads_for_summary:
+                try:
+                    h_result = HAnalyzer().analyze(h_reads_for_summary)
+                except HReferenceMissingError as e:
+                    h_error_message = str(e)
+
+        # MNS (GYPA + GYPB) inputs — reuse the RHD AB1/FASTA processors.
+        mns_ab1_traces, _ = process_rhd_ab1_files(
+            mns_ab1_files, het_ratio=threshold_ratio) if mns_ab1_files else (None, None)
+        mns_fasta_traces = process_rhd_fasta_files(mns_fasta_files) if mns_fasta_files else None
+
+        mns_input_traces = []
+        if mns_ab1_traces:
+            mns_input_traces.extend(mns_ab1_traces)
+        if mns_fasta_traces:
+            mns_input_traces.extend(mns_fasta_traces)
+
+        mns_result = None
+        mns_reads_for_summary = []
+        mns_error_message = None
+        if mns_input_traces:
+            for i, trace in enumerate(mns_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"MNS_read_{i+1}"
+                        qual = trace.get('quality_trimmed')
+                        mns_reads_for_summary.append((rid, seq, qual))
+            if mns_reads_for_summary:
+                try:
+                    mns_result = MNSAnalyzer().analyze(mns_reads_for_summary)
+                except MNSReferenceMissingError as e:
+                    mns_error_message = str(e)
+
+        # Diego (SLC4A1) inputs — reuse the RHD AB1/FASTA processors.
+        di_ab1_traces, _ = process_rhd_ab1_files(
+            di_ab1_files, het_ratio=threshold_ratio) if di_ab1_files else (None, None)
+        di_fasta_traces = process_rhd_fasta_files(di_fasta_files) if di_fasta_files else None
+
+        di_input_traces = []
+        if di_ab1_traces:
+            di_input_traces.extend(di_ab1_traces)
+        if di_fasta_traces:
+            di_input_traces.extend(di_fasta_traces)
+
+        di_result = None
+        di_reads_for_summary = []
+        di_error_message = None
+        if di_input_traces:
+            for i, trace in enumerate(di_input_traces):
+                if isinstance(trace, dict) and 'seq' in trace:
+                    seq = trace.get('seq', '')
+                    if seq and len(seq) > 50:
+                        rid = trace.get('filename') or f"DI_read_{i+1}"
+                        qual = trace.get('quality_trimmed')
+                        di_reads_for_summary.append((rid, seq, qual))
+            if di_reads_for_summary:
+                try:
+                    di_result = DIAnalyzer().analyze(di_reads_for_summary)
+                except DIReferenceMissingError as e:
+                    di_error_message = str(e)
+
         status_container.empty()
+
+        # === Routing decisions from the unified auto-detect upload ===
+        # Only rendered when the unified upload was actually used. Shows
+        # which system each file was dispatched to, and flags any files
+        # whose names didn't match a known amplicon convention.
+        if routing_decisions:
+            n_routed = sum(1 for r in routing_decisions if r['system'])
+            n_unrouted = sum(1 for r in routing_decisions if not r['system'])
+            st.markdown(f"### 🚀 Auto-detect routing  "
+                        f"({n_routed} routed, {n_unrouted} unrouted)")
+            _routing_rows = [{
+                'File':   r['filename'],
+                'Kind':   r['kind'].upper(),
+                'Routed to': r['system'] or '— (unrouted, skipped)',
+                'Status': '✓ Routed' if r['system'] else '⚠ Name not recognised',
+            } for r in routing_decisions]
+            st.dataframe(pd.DataFrame(_routing_rows),
+                         hide_index=True, use_container_width=True)
+            if n_unrouted:
+                st.caption(
+                    "Unrouted files were not analyzed. Rename them to include "
+                    "a recognised pattern (RHCE, RHD, ABO, KEL, FY, JK, MIA, "
+                    "DI, FUT1) or upload via the system-specific uploaders."
+                )
 
         # === FINAL BLOOD GROUP RESULT banner (consolidated) ===
         try:
@@ -1618,6 +2330,12 @@ if analyze_button:
                 _isbt_handler,
                 has_fasta=bool(fasta_files),
                 rhce_result=rhce_result,
+                kel_result=kel_result,
+                fy_result=fy_result,
+                jk_result=jk_result,
+                h_result=h_result,
+                mns_result=mns_result,
+                di_result=di_result,
             )
             display_final_blood_group_result(_summary)
         except Exception as banner_exc:
@@ -1874,246 +2592,916 @@ if analyze_button:
                          st.write(msg)
                      st.write("---")
 
-        # === RHD ANALYSIS SECTION ===
+        # === DETAILED SYSTEM ANALYSIS ===
+        # Only one blood-group system's detailed view is shown at a time so
+        # that results don't overlap. The selectbox lists only systems whose
+        # inputs were provided this run.
+        detail_systems = []
         if rhd_input_traces:
-            st.markdown("---")
-            st.header("🩸 RHD Analysis Results")
-
-            # Extract sequences from AB1 traces and RHD FASTA traces for RHD analysis
-            # Each trace is a separate amplicon for voting
-            rhd_sequences = []
-            qc_by_name = {}
-            for i, trace in enumerate(rhd_input_traces):
-                if isinstance(trace, dict) and 'seq' in trace:
-                    seq = trace.get('seq', '')
-                    if seq and len(seq) > 50:
-                        filename = trace.get('filename', '')
-                        if not filename:
-                            filename = f"Amplicon_{i+1}"
-                        rhd_sequences.append((filename, seq))
-                        if 'qc' in trace:
-                            qc_by_name[filename] = trace['qc']
-
-            if rhd_sequences:
-                # Use multi-amplicon voting system
-                analyzer = RHDAnalyzer()
-                voting_result = analyzer.analyze_multiple_amplicons(rhd_sequences)
-
-                # Attach QC metadata (Phred trim / het encoding) by filename so
-                # the UI can show data quality alongside each amplicon's call.
-                for r in voting_result['amplicon_results']:
-                    qc = qc_by_name.get(r['name'])
-                    if qc:
-                        r['qc'] = qc
-
-                st.subheader(f"Multi-Amplicon Analysis ({voting_result['total_amplicons']} amplicon(s))")
-
-                # Display voting table
-                st.write("### Individual Amplicon Results:")
-
-                table_data = []
-                for result in voting_result['amplicon_results']:
-                    qc = result.get('qc') or {}
-                    if qc:
-                        qc_summary = (
-                            f"5':{qc.get('trimmed_5p', 0)} "
-                            f"3':{qc.get('trimmed_3p', 0)} "
-                            f"N:{qc.get('masked_internal', 0)} "
-                            f"het:{qc.get('het_positions_encoded', 0)}"
-                        )
-                    else:
-                        qc_summary = '-'
-                    zyg = result.get('zygosity')
-                    table_data.append({
-                        'File': result['name'],
-                        'Length (bp)': result['length'],
-                        'Region': result['region'],
-                        'Identity (%)': f"{result['identity']:.1f}%",
-                        'Variants': result['variants'],
-                        'ISBT Allele': result.get('allele') or '-',
-                        'Zygosity': zyg.upper() if zyg else '-',
-                        'QC (trim/mask/het)': qc_summary,
-                        'Vote': result['vote'],
-                    })
-
-                df_results = pd.DataFrame(table_data)
-                st.dataframe(df_results, use_container_width=True, hide_index=True)
-
-                # Display voting summary
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("RhD+ Votes", voting_result['votes']['RhD+'])
-                with col2:
-                    st.metric("RhD- Votes", voting_result['votes']['RhD-'])
-                with col3:
-                    st.metric("Inconclusive", voting_result['votes']['Inconclusive'])
-                with col4:
-                    st.metric("Confidence", voting_result['confidence'])
-
-                # Final verdict
-                st.markdown("---")
-                verdict = voting_result['final_verdict']
-                confidence = voting_result['confidence']
-
-                if 'RhD+' in verdict:
-                    st.success(f"### ✅ Final Result: {verdict}")
-                elif 'RhD-' in verdict:
-                    st.warning(f"### ⚠️ Final Result: {verdict}")
-                else:
-                    st.info(f"### ℹ️ Final Result: {verdict}")
-
-                st.write(f"**Confidence Level:** {confidence}")
-                st.write(f"**Reasoning:** {voting_result['details']}")
-
-                # Detailed explanations for each amplicon
-                with st.expander("📋 Detailed Amplicon Analysis"):
-                    for result in voting_result['amplicon_results']:
-                        with st.expander(f"{result['name']} - {result['region']} ({result['length']}bp)"):
-                            st.write(f"**Region:** {result['region']}")
-                            st.write(f"**Length:** {result['length']} bp")
-                            st.write(f"**Identity:** {result['identity']:.1f}%")
-                            st.write(f"**Variants:** {result['variants']}")
-                            st.write(f"**ISBT Allele:** {result.get('allele') or '-'}")
-                            st.write(f"**Phenotype:** {result.get('rhd_status', '-')}")
-                            st.write(f"**Vote:** {result['vote']}")
-                            if result.get('zygosity'):
-                                st.write(f"**Zygosity (diagnostic SNP):** {result['zygosity'].upper()}")
-                            st.write(f"**Reason:** {result['reason']}")
-                            if result.get('mechanism'):
-                                st.write(f"**Mechanism:** {result['mechanism']}")
-                            if result.get('serology'):
-                                st.warning(f"**Serology recommendation:** {result['serology']}")
-                            if result.get('note'):
-                                st.info(f"**Note:** {result['note']}")
-                            qc = result.get('qc')
-                            if qc:
-                                st.write(
-                                    f"**QC (Phred Q≥{qc.get('q_threshold')}):** "
-                                    f"trimmed {qc.get('trimmed_5p', 0)} bp from 5', "
-                                    f"{qc.get('trimmed_3p', 0)} bp from 3'; "
-                                    f"masked {qc.get('masked_internal', 0)} internal low-Q bases as N; "
-                                    f"encoded {qc.get('het_positions_encoded', 0)} heterozygous position(s) as IUPAC; "
-                                    f"final length {qc.get('final_length', 0)} bp "
-                                    f"(original {qc.get('original_length', 0)} bp)."
-                                )
-                            snps = result.get('diagnostic_snps') or {}
-                            if snps:
-                                st.write("**Diagnostic SNPs detected:**")
-                                snp_rows = []
-                                for snp_name, info in snps.items():
-                                    snp_rows.append({
-                                        'SNP': snp_name,
-                                        'cDNA pos': info.get('cDNA_position'),
-                                        'Ref': info.get('reference_base'),
-                                        'Query': info.get('query_base'),
-                                        'Zygosity': (info.get('zygosity') or '-').upper(),
-                                        'Significance': info.get('significance'),
-                                    })
-                                st.dataframe(pd.DataFrame(snp_rows), hide_index=True, use_container_width=True)
-            else:
-                st.info("AB1 files processed but no valid sequences found for RHD analysis.")
-
-        # === RHCE ANALYSIS SECTION ===
+            detail_systems.append("RHD")
         if rhce_input_traces:
+            detail_systems.append("RHCE")
+        if kel_input_traces:
+            detail_systems.append("Kell")
+        if fy_input_traces:
+            detail_systems.append("Duffy")
+        if jk_input_traces:
+            detail_systems.append("Kidd")
+        if h_input_traces:
+            detail_systems.append("H")
+        if mns_input_traces:
+            detail_systems.append("MNS")
+        if di_input_traces:
+            detail_systems.append("Diego")
+
+        if detail_systems:
             st.markdown("---")
-            st.header("🩸 RHCE Analysis Results (C/c + E/e)")
+            st.header("🩸 Detailed System Analysis")
+            selected_system = st.selectbox(
+                "Show details for:",
+                detail_systems,
+                key="detailed_system_selector",
+            )
 
-            if not rhce_reads_for_summary:
-                st.info("RHCE files processed but no valid sequences found.")
-            elif rhce_error_message is not None:
-                st.error("RHCE reference data is missing.")
-                st.code(rhce_error_message)
-                st.info("See **utils/data/RHCE_REFERENCE_README.md** for download instructions.")
-            else:
-                if rhce_result is not None:
-                    # Headline result
-                    conf = rhce_result['overall_confidence']
-                    pheno = rhce_result['phenotype']
-                    if conf == 'HIGH':
-                        st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
-                    elif conf == 'MEDIUM':
-                        st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
-                    elif conf == 'LOW':
-                        st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
-                    else:
-                        st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+            if selected_system == "RHD":
+                st.subheader("RHD Analysis Results")
 
-                    st.caption(rhce_result['reason'])
+                # Extract sequences from AB1 traces and RHD FASTA traces for RHD analysis
+                # Each trace is a separate amplicon for voting
+                rhd_sequences = []
+                qc_by_name = {}
+                for i, trace in enumerate(rhd_input_traces):
+                    if isinstance(trace, dict) and 'seq' in trace:
+                        seq = trace.get('seq', '')
+                        if seq and len(seq) > 50:
+                            filename = trace.get('filename', '')
+                            if not filename:
+                                filename = f"Amplicon_{i+1}"
+                            # Per-base Phred (AB1) or None (FASTA). The RHD
+                            # analyzer's analyze_multiple_amplicons accepts
+                            # 3-tuples and applies Q30 at SNP positions.
+                            qual = trace.get('quality_trimmed')
+                            rhd_sequences.append((filename, seq, qual))
+                            if 'qc' in trace:
+                                qc_by_name[filename] = trace['qc']
 
-                    # Read coverage metrics
+                if rhd_sequences:
+                    analyzer = RHDAnalyzer()
+                    voting_result = analyzer.analyze_multiple_amplicons(rhd_sequences)
+
+                    for r in voting_result['amplicon_results']:
+                        qc = qc_by_name.get(r['name'])
+                        if qc:
+                            r['qc'] = qc
+
+                    st.subheader(f"Multi-Amplicon Analysis ({voting_result['total_amplicons']} amplicon(s))")
+
+                    st.write("### Individual Amplicon Results:")
+
+                    table_data = []
+                    for result in voting_result['amplicon_results']:
+                        qc = result.get('qc') or {}
+                        if qc:
+                            qc_summary = (
+                                f"5':{qc.get('trimmed_5p', 0)} "
+                                f"3':{qc.get('trimmed_3p', 0)} "
+                                f"N:{qc.get('masked_internal', 0)} "
+                                f"het:{qc.get('het_positions_encoded', 0)}"
+                            )
+                        else:
+                            qc_summary = '-'
+                        zyg = result.get('zygosity')
+                        table_data.append({
+                            'File': result['name'],
+                            'Length (bp)': result['length'],
+                            'Region': result['region'],
+                            'Identity (%)': f"{result['identity']:.1f}%",
+                            'Variants': result['variants'],
+                            'ISBT Allele': result.get('allele') or '-',
+                            'Zygosity': zyg.upper() if zyg else '-',
+                            'QC (trim/mask/het)': qc_summary,
+                            'Vote': result['vote'],
+                        })
+
+                    df_results = pd.DataFrame(table_data)
+                    st.dataframe(df_results, use_container_width=True, hide_index=True)
+
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Reads (callable / total)",
-                                  f"{rhce_result['reads_callable']} / {rhce_result['reads_total']}")
+                        st.metric("RhD+ Votes", voting_result['votes']['RhD+'])
                     with col2:
-                        st.metric("C/c call", rhce_result['c_e_call']['genotype'] or "–")
+                        st.metric("RhD- Votes", voting_result['votes']['RhD-'])
                     with col3:
-                        st.metric("E/e call", rhce_result['big_E_call']['genotype'] or "–")
+                        st.metric("Inconclusive", voting_result['votes']['Inconclusive'])
                     with col4:
-                        st.metric("Overall confidence", conf)
+                        st.metric("Confidence", voting_result['confidence'])
 
-                    # ISBT haplotype interpretation
-                    if rhce_result['allele_options']:
-                        st.markdown("#### Possible ISBT haplotype pairs")
-                        st.caption(
-                            "Sanger genotyping cannot phase haplotypes. "
-                            "For compound heterozygotes both phase options are listed."
-                        )
-                        for opt in rhce_result['allele_options']:
-                            st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`")
+                    st.markdown("---")
+                    verdict = voting_result['final_verdict']
+                    confidence = voting_result['confidence']
 
-                    # Per-SNP consensus table
-                    st.markdown("#### Per-SNP consensus")
-                    snp_rows = []
-                    for snp_name, cons in rhce_result['snp_consensus'].items():
-                        votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
-                        snp_rows.append({
-                            'SNP': snp_name,
-                            'Consensus': cons['consensus'],
-                            'Call': cons.get('call', '–'),
-                            'Confidence': cons['confidence'],
-                            'Reads covering': cons['reads_covering'],
-                            'Votes': votes_str,
-                            'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
-                        })
-                    st.dataframe(pd.DataFrame(snp_rows),
-                                 hide_index=True, use_container_width=True)
+                    if 'RhD+' in verdict:
+                        st.success(f"### ✅ Final Result: {verdict}")
+                    elif 'RhD-' in verdict:
+                        st.warning(f"### ⚠️ Final Result: {verdict}")
+                    else:
+                        st.info(f"### ℹ️ Final Result: {verdict}")
 
-                    # Partial-E flags
-                    partial = rhce_result['big_E_call'].get('partial_markers') or []
-                    if partial:
-                        st.warning(
-                            "**Asian partial-E variant(s) detected:** "
-                            + "; ".join(f"{p['snp']} ({p['zygosity']}) - {p['significance']}" for p in partial)
-                        )
+                    st.write(f"**Confidence Level:** {confidence}")
+                    st.write(f"**Reasoning:** {voting_result['details']}")
 
-                    # Per-read drill-down
-                    with st.expander("📋 Per-read details"):
-                        for read in rhce_result['per_read_details']:
-                            st.markdown(f"**{read['read_id']}** — "
-                                        f"strand={read['strand']}, "
-                                        f"identity={read['identity']}%, "
-                                        f"length={read['query_length']} bp, "
-                                        f"callable={read['callable']}")
-                            st.caption(read['reason'])
-                            read_rows = []
-                            for snp_name, call in read['snp_calls'].items():
-                                if call.get('covered'):
-                                    read_rows.append({
-                                        'SNP': snp_name,
-                                        'Call': call.get('call'),
-                                        'Zygosity': call.get('zygosity', '–'),
-                                        'Query base': call.get('query_base', '–'),
-                                    })
-                                else:
-                                    read_rows.append({
-                                        'SNP': snp_name,
-                                        'Call': 'not covered',
-                                        'Zygosity': '–',
-                                        'Query base': '–',
-                                    })
-                            st.dataframe(pd.DataFrame(read_rows),
-                                         hide_index=True, use_container_width=True)
+                    with st.expander("📋 Detailed Amplicon Analysis"):
+                        for result in voting_result['amplicon_results']:
+                            with st.expander(f"{result['name']} - {result['region']} ({result['length']}bp)"):
+                                st.write(f"**Region:** {result['region']}")
+                                st.write(f"**Length:** {result['length']} bp")
+                                st.write(f"**Identity:** {result['identity']:.1f}%")
+                                st.write(f"**Variants:** {result['variants']}")
+                                st.write(f"**ISBT Allele:** {result.get('allele') or '-'}")
+                                st.write(f"**Phenotype:** {result.get('rhd_status', '-')}")
+                                st.write(f"**Vote:** {result['vote']}")
+                                if result.get('zygosity'):
+                                    st.write(f"**Zygosity (diagnostic SNP):** {result['zygosity'].upper()}")
+                                st.write(f"**Reason:** {result['reason']}")
+                                if result.get('mechanism'):
+                                    st.write(f"**Mechanism:** {result['mechanism']}")
+                                if result.get('serology'):
+                                    st.warning(f"**Serology recommendation:** {result['serology']}")
+                                if result.get('note'):
+                                    st.info(f"**Note:** {result['note']}")
+                                qc = result.get('qc')
+                                if qc:
+                                    st.write(
+                                        f"**QC (Phred Q≥{qc.get('q_threshold')}):** "
+                                        f"trimmed {qc.get('trimmed_5p', 0)} bp from 5', "
+                                        f"{qc.get('trimmed_3p', 0)} bp from 3'; "
+                                        f"masked {qc.get('masked_internal', 0)} internal low-Q bases as N; "
+                                        f"encoded {qc.get('het_positions_encoded', 0)} heterozygous position(s) as IUPAC; "
+                                        f"final length {qc.get('final_length', 0)} bp "
+                                        f"(original {qc.get('original_length', 0)} bp)."
+                                    )
+                                snps = result.get('diagnostic_snps') or {}
+                                if snps:
+                                    st.write("**Diagnostic SNPs detected:**")
+                                    snp_rows = []
+                                    for snp_name, info in snps.items():
+                                        snp_rows.append({
+                                            'SNP': snp_name,
+                                            'cDNA pos': info.get('cDNA_position'),
+                                            'Ref': info.get('reference_base'),
+                                            'Query': info.get('query_base'),
+                                            'Zygosity': (info.get('zygosity') or '-').upper(),
+                                            'Significance': info.get('significance'),
+                                        })
+                                    st.dataframe(pd.DataFrame(snp_rows), hide_index=True, use_container_width=True)
+                else:
+                    st.info("AB1 files processed but no valid sequences found for RHD analysis.")
+
+            elif selected_system == "RHCE":
+                st.subheader("RHCE Analysis Results (C/c + E/e)")
+
+                if not rhce_reads_for_summary:
+                    st.info("RHCE files processed but no valid sequences found.")
+                elif rhce_error_message is not None:
+                    st.error("RHCE reference data is missing.")
+                    st.code(rhce_error_message)
+                    st.info("See **utils/data/RHCE_REFERENCE_README.md** for download instructions.")
+                else:
+                    if rhce_result is not None:
+                        # Headline result
+                        conf = rhce_result['overall_confidence']
+                        pheno = rhce_result['phenotype']
+                        if conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(rhce_result['reason'])
+
+                        # Read coverage metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{rhce_result['reads_callable']} / {rhce_result['reads_total']}")
+                        with col2:
+                            st.metric("C/c call", rhce_result['c_e_call']['genotype'] or "–")
+                        with col3:
+                            st.metric("E/e call", rhce_result['big_E_call']['genotype'] or "–")
+                        with col4:
+                            st.metric("Overall confidence", conf)
+
+                        # ISBT haplotype interpretation
+                        if rhce_result['allele_options']:
+                            st.markdown("#### Possible ISBT haplotype pairs")
+                            st.caption(
+                                "Sanger genotyping cannot phase haplotypes. "
+                                "For compound heterozygotes both phase options are listed."
+                            )
+                            for opt in rhce_result['allele_options']:
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`")
+
+                        # Per-SNP consensus table
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in rhce_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        # Partial-E flags
+                        partial = rhce_result['big_E_call'].get('partial_markers') or []
+                        if partial:
+                            st.warning(
+                                "**Asian partial-E variant(s) detected:** "
+                                + "; ".join(f"{p['snp']} ({p['zygosity']}) - {p['significance']}" for p in partial)
+                            )
+
+                        # Per-read drill-down
+                        with st.expander("📋 Per-read details"):
+                            for read in rhce_result['per_read_details']:
+                                st.markdown(f"**{read['read_id']}** — "
+                                            f"strand={read['strand']}, "
+                                            f"identity={read['identity']}%, "
+                                            f"length={read['query_length']} bp, "
+                                            f"callable={read['callable']}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
+
+            elif selected_system == "Kell":
+                # Mirrors the RHCE detail layout exactly: phenotype banner →
+                # read-coverage metrics → ISBT haplotype → per-SNP consensus
+                # table → per-read drill-down.
+                st.subheader("Kell Analysis Results (K/k)")
+
+                if not kel_reads_for_summary:
+                    st.info("Kell files processed but no valid sequences found.")
+                elif kel_error_message is not None:
+                    st.error("KEL reference data is missing.")
+                    st.code(kel_error_message)
+                    st.info("See **utils/data/KEL_REFERENCE_README.md** for download instructions.")
+                else:
+                    if kel_result is not None:
+                        conf = kel_result['overall_confidence']
+                        pheno = kel_result['phenotype']
+                        if conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(kel_result['reason'])
+
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{kel_result['reads_callable']} / {kel_result['reads_total']}")
+                        with col2:
+                            st.metric("K/k call",
+                                      (kel_result.get('k_axis_call') or {}).get('genotype') or "–")
+                        with col3:
+                            st.metric("Overall confidence", conf)
+
+                        if kel_result['allele_options']:
+                            st.markdown("#### ISBT haplotype")
+                            st.caption(
+                                "Single-axis (K/k) call — exactly one haplotype pair, "
+                                "no phase ambiguity."
+                            )
+                            for opt in kel_result['allele_options']:
+                                serology = opt.get('serology', '')
+                                serology_tag = f" — {serology}" if serology else ''
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`{serology_tag}")
+
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in kel_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        with st.expander("📋 Per-read details"):
+                            for read in kel_result['per_read_details']:
+                                st.markdown(f"**{read['read_id']}** — "
+                                            f"strand={read['strand']}, "
+                                            f"identity={read['identity']}%, "
+                                            f"length={read['query_length']} bp, "
+                                            f"callable={read['callable']}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
+
+            elif selected_system == "Duffy":
+                # Mirrors the RHCE/KEL detail layout: phenotype banner ->
+                # coverage metrics -> ISBT haplotype(s) -> per-SNP consensus
+                # table -> per-read drill-down expander. Adds a phase-ambiguity
+                # warning when GATA + A/B both heterozygous.
+                st.subheader("Duffy Analysis Results (FY)")
+
+                if not fy_reads_for_summary:
+                    st.info("Duffy files processed but no valid sequences found.")
+                elif fy_error_message is not None:
+                    st.error("FY reference data is missing.")
+                    st.code(fy_error_message)
+                    st.info("See **utils/data/FY_REFERENCE_README.md** for download instructions.")
+                else:
+                    if fy_result is not None:
+                        conf = fy_result['overall_confidence']
+                        pheno = fy_result['phenotype']
+                        if conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(fy_result['reason'])
+
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{fy_result['reads_callable']} / {fy_result['reads_total']}")
+                        with col2:
+                            st.metric("FY*A/FY*B",
+                                      (fy_result.get('a_b_call') or {}).get('genotype') or "–")
+                        with col3:
+                            gata = (fy_result.get('gata_call') or {}).get('consensus')
+                            st.metric("GATA -67",
+                                      {'hom_ref': 'T/T (ref)', 'het': 'T/C',
+                                       'hom_alt': 'C/C (silenced)'}.get(gata, "–"))
+                        with col4:
+                            fy_x = (fy_result.get('fy_x_call') or {}).get('consensus')
+                            st.metric("FY*X (c.265)",
+                                      {'hom_ref': 'C/C (ref)', 'het': 'C/T',
+                                       'hom_alt': 'T/T (weak)'}.get(fy_x, "–"))
+                        with col5:
+                            st.metric("Overall confidence", conf)
+
+                        # GATA / cDNA-reference warning
+                        if (fy_result.get('gata_call') or {}).get('confidence') == 'NONE':
+                            st.warning(
+                                "GATA -67T>C is **not callable** in this run. "
+                                "If a genomic amplicon covering the ACKR1 "
+                                "promoter is available, use a GenBank reference "
+                                "(see FY_REFERENCE_README.md) to detect "
+                                "Fy(a-b-) erythroid-silencing."
+                            )
+
+                        if fy_result['allele_options']:
+                            phase_ambiguous = len(fy_result['allele_options']) > 1
+                            if phase_ambiguous:
+                                st.markdown("#### Possible ISBT haplotype pairs (phase ambiguous)")
+                                st.caption(
+                                    "GATA-null heterozygous + FY*A/FY*B heterozygous "
+                                    "→ Sanger genotyping cannot phase which allele the "
+                                    "GATA mutation is in cis with. Both options shown."
+                                )
+                            else:
+                                st.markdown("#### ISBT haplotype")
+                            for opt in fy_result['allele_options']:
+                                serology = opt.get('serology', '')
+                                serology_tag = f" — {serology}" if serology else ''
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`{serology_tag}")
+
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in fy_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        with st.expander("📋 Per-read details"):
+                            for read in fy_result['per_read_details']:
+                                st.markdown(f"**{read['read_id']}** — "
+                                            f"strand={read['strand']}, "
+                                            f"identity={read['identity']}%, "
+                                            f"length={read['query_length']} bp, "
+                                            f"callable={read['callable']}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
+
+            elif selected_system == "Kidd":
+                # Mirrors the RHCE/KEL/Duffy detail layout: phenotype banner ->
+                # coverage metrics -> ISBT haplotype(s) -> per-SNP consensus ->
+                # per-read drill-down. Includes phase-ambiguity warning and a
+                # splice-uncallable warning when the c.342-1 SNP wasn't reached.
+                st.subheader("Kidd Analysis Results (JK)")
+
+                if not jk_reads_for_summary:
+                    st.info("Kidd files processed but no valid sequences found.")
+                elif jk_error_message is not None:
+                    st.error("JK reference data is missing.")
+                    st.code(jk_error_message)
+                    st.info("See **utils/data/JK_REFERENCE_README.md** for download instructions.")
+                else:
+                    if jk_result is not None:
+                        conf = jk_result['overall_confidence']
+                        pheno = jk_result['phenotype']
+                        if conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(jk_result['reason'])
+
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{jk_result['reads_callable']} / {jk_result['reads_total']}")
+                        with col2:
+                            st.metric("JK*A/JK*B",
+                                      (jk_result.get('a_b_call') or {}).get('genotype') or "–")
+                        with col3:
+                            splice = (jk_result.get('snp_consensus') or {}).get('c.342-1G>A', {}).get('consensus')
+                            st.metric("Splice (c.342-1)",
+                                      {'hom_ref': 'G/G (ref)', 'het': 'G/A',
+                                       'hom_alt': 'A/A (silenced)'}.get(splice, "–"))
+                        with col4:
+                            asian = (jk_result.get('snp_consensus') or {}).get('c.871T>C', {}).get('consensus')
+                            st.metric("Asian null (c.871)",
+                                      {'hom_ref': 'T/T (ref)', 'het': 'T/C',
+                                       'hom_alt': 'C/C (silenced)'}.get(asian, "–"))
+                        with col5:
+                            st.metric("Overall confidence", conf)
+
+                        # Splice / cDNA-reference warning
+                        splice_cons = (jk_result.get('snp_consensus') or {}).get('c.342-1G>A', {})
+                        if splice_cons.get('confidence') == 'NONE':
+                            st.warning(
+                                "Splice-acceptor SNP **c.342-1G>A is not callable** "
+                                "in this run. If a genomic amplicon covering intron "
+                                "5 of SLC14A1 is available, use a GenBank reference "
+                                "(see JK_REFERENCE_README.md) to detect Polynesian "
+                                "Jk(a-b-)."
+                            )
+
+                        # Compound-het flag
+                        if (jk_result.get('null_call') or {}).get('compound_het'):
+                            st.warning(
+                                "**Compound heterozygous null variants detected** "
+                                "(both c.342-1 and c.871 het in the same sample). "
+                                "This is rare — confidence has been lowered; "
+                                "recommend chromatogram review and serology."
+                            )
+
+                        if jk_result['allele_options']:
+                            phase_ambiguous = len(jk_result['allele_options']) > 1
+                            if phase_ambiguous:
+                                st.markdown("#### Possible ISBT haplotype pairs (phase ambiguous)")
+                                st.caption(
+                                    "Null variant heterozygous + JK*A/JK*B heterozygous "
+                                    "→ Sanger genotyping cannot phase which allele the "
+                                    "null mutation is in cis with. Both options shown."
+                                )
+                            else:
+                                st.markdown("#### ISBT haplotype")
+                            for opt in jk_result['allele_options']:
+                                serology = opt.get('serology', '')
+                                serology_tag = f" — {serology}" if serology else ''
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`{serology_tag}")
+
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in jk_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        with st.expander("📋 Per-read details"):
+                            for read in jk_result['per_read_details']:
+                                st.markdown(f"**{read['read_id']}** — "
+                                            f"strand={read['strand']}, "
+                                            f"identity={read['identity']}%, "
+                                            f"length={read['query_length']} bp, "
+                                            f"callable={read['callable']}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
+
+            elif selected_system == "H":
+                # Mirrors the RHCE/KEL/Duffy/Kidd detail layout, but the H
+                # system has no primary antigen-discriminator SNP and adds
+                # a transfusion-safety alert when the Bombay (Oh) state is
+                # detected (recipient rejects standard ABO blood).
+                st.subheader("H Analysis Results (FUT1)")
+
+                if not h_reads_for_summary:
+                    st.info("H files processed but no valid sequences found.")
+                elif h_error_message is not None:
+                    st.error("H (FUT1) reference data is missing.")
+                    st.code(h_error_message)
+                    st.info("See **utils/data/H_REFERENCE_README.md** for download instructions.")
+                else:
+                    if h_result is not None:
+                        conf = h_result['overall_confidence']
+                        pheno = h_result['phenotype']
+                        state = (h_result.get('h_state_call') or {}).get('state')
+
+                        # Bombay gets the loud red banner regardless of
+                        # confidence — it's a transfusion-safety alert.
+                        if state == 'bombay':
+                            st.error(f"### 🚨 **{pheno}** (confidence: {conf})")
+                            st.error(
+                                "**TRANSFUSION ALERT** — Bombay (Oh) recipients "
+                                "have antibodies against the H antigen and **reject "
+                                "all standard ABO-typed donor blood**. "
+                                "Bombay-compatible units must be sourced."
+                            )
+                        elif conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(h_result['reason'])
+
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{h_result['reads_callable']} / {h_result['reads_total']}")
+                        with col2:
+                            c725 = (h_result.get('snp_consensus') or {}).get('c.725T>G', {}).get('consensus')
+                            st.metric("c.725 (Indian Bombay)",
+                                      {'hom_ref': 'T/T (ref)', 'het': 'T/G',
+                                       'hom_alt': 'G/G (Bombay)'}.get(c725, "–"))
+                        with col3:
+                            c586 = (h_result.get('snp_consensus') or {}).get('c.586C>T', {}).get('consensus')
+                            st.metric("c.586 (nonsense)",
+                                      {'hom_ref': 'C/C (ref)', 'het': 'C/T',
+                                       'hom_alt': 'T/T (Bombay)'}.get(c586, "–"))
+                        with col4:
+                            c460 = (h_result.get('snp_consensus') or {}).get('c.460T>C', {}).get('consensus')
+                            st.metric("c.460 (h2 weak)",
+                                      {'hom_ref': 'T/T (ref)', 'het': 'T/C',
+                                       'hom_alt': 'C/C (weak)'}.get(c460, "–"))
+                        with col5:
+                            st.metric("Overall confidence", conf)
+
+                        if h_result['allele_options']:
+                            st.markdown("#### ISBT haplotype")
+                            for opt in h_result['allele_options']:
+                                serology = opt.get('serology', '')
+                                serology_tag = f" — {serology}" if serology else ''
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`{serology_tag}")
+
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in h_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        with st.expander("📋 Per-read details"):
+                            for read in h_result['per_read_details']:
+                                st.markdown(f"**{read['read_id']}** — "
+                                            f"strand={read['strand']}, "
+                                            f"identity={read['identity']}%, "
+                                            f"length={read['query_length']} bp, "
+                                            f"callable={read['callable']}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
+
+            elif selected_system == "MNS":
+                # Mirrors the established detail layout: phenotype banner ->
+                # coverage metrics -> ISBT haplotype(s) -> per-SNP consensus
+                # -> per-read drill-down. Adds per-gene identity reporting
+                # and a phase-ambiguity warning for the MN+Ss double-het case.
+                st.subheader("MNS Analysis Results (GYPA + GYPB)")
+
+                if not mns_reads_for_summary:
+                    st.info("MNS files processed but no valid sequences found.")
+                elif mns_error_message is not None:
+                    st.error("MNS reference data is missing.")
+                    st.code(mns_error_message)
+                    st.info("See **utils/data/MNS_REFERENCE_README.md** for download instructions.")
+                else:
+                    if mns_result is not None:
+                        conf = mns_result['overall_confidence']
+                        pheno = mns_result['phenotype']
+                        if conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(mns_result['reason'])
+
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{mns_result['reads_callable']} / {mns_result['reads_total']}")
+                        with col2:
+                            st.metric("M/N (GYPA)",
+                                      (mns_result.get('m_n_call') or {}).get('genotype') or "–")
+                        with col3:
+                            st.metric("S/s (GYPB)",
+                                      (mns_result.get('s_s_call') or {}).get('genotype') or "–")
+                        with col4:
+                            st.metric("Overall confidence", conf)
+
+                        if mns_result['allele_options']:
+                            phase_ambiguous = len(mns_result['allele_options']) > 1
+                            if phase_ambiguous:
+                                st.markdown("#### Possible ISBT haplotype pairs (phase ambiguous)")
+                                st.caption(
+                                    "Both M/N and S/s heterozygous → the four "
+                                    "MNS haplotypes (MS, Ms, NS, Ns) can pair as "
+                                    "MS/Ns or Ms/NS. Sanger genotyping cannot "
+                                    "phase the two — both options shown."
+                                )
+                            else:
+                                st.markdown("#### ISBT haplotype")
+                            for opt in mns_result['allele_options']:
+                                serology = opt.get('serology', '')
+                                serology_tag = f" — {serology}" if serology else ''
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`{serology_tag}")
+
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in mns_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        with st.expander("📋 Per-read details"):
+                            for read in mns_result['per_read_details']:
+                                per_gene = read.get('per_gene_identity') or {}
+                                per_gene_str = (
+                                    "  ".join(f"{g}={i}%" for g, i in per_gene.items())
+                                    if per_gene else "—"
+                                )
+                                st.markdown(
+                                    f"**{read['read_id']}** — "
+                                    f"best={read.get('best_gene', '?')} "
+                                    f"strand={read['strand']}, "
+                                    f"identity={read['identity']}%, "
+                                    f"length={read['query_length']} bp, "
+                                    f"callable={read['callable']}"
+                                )
+                                st.caption(f"Per-gene identity: {per_gene_str}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Gene': call.get('gene', '–'),
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Gene': '–',
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
+
+            elif selected_system == "Diego":
+                # Mirrors the established detail layout. Single-axis system
+                # (Di(a)/Di(b)) so the metric strip is compact and there's
+                # no phase-ambiguity branch.
+                st.subheader("Diego Analysis Results (DI / SLC4A1)")
+
+                if not di_reads_for_summary:
+                    st.info("Diego files processed but no valid sequences found.")
+                elif di_error_message is not None:
+                    st.error("Diego (SLC4A1) reference data is missing.")
+                    st.code(di_error_message)
+                    st.info("See **utils/data/DI_REFERENCE_README.md** for download instructions.")
+                else:
+                    if di_result is not None:
+                        conf = di_result['overall_confidence']
+                        pheno = di_result['phenotype']
+                        if conf == 'HIGH':
+                            st.success(f"### ✅ Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'MEDIUM':
+                            st.info(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+                        elif conf == 'LOW':
+                            st.warning(f"### ⚠️ Phenotype: **{pheno}**  (confidence: {conf})")
+                        else:
+                            st.error(f"### Phenotype: **{pheno}**  (confidence: {conf})")
+
+                        st.caption(di_result['reason'])
+
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Reads (callable / total)",
+                                      f"{di_result['reads_callable']} / {di_result['reads_total']}")
+                        with col2:
+                            st.metric("Di(a)/Di(b) call",
+                                      (di_result.get('di_axis_call') or {}).get('genotype') or "–")
+                        with col3:
+                            st.metric("Overall confidence", conf)
+
+                        if di_result['allele_options']:
+                            st.markdown("#### ISBT haplotype")
+                            for opt in di_result['allele_options']:
+                                serology = opt.get('serology', '')
+                                serology_tag = f" — {serology}" if serology else ''
+                                st.write(f"- **{opt['haplotypes']}** → `{opt['isbt']}`{serology_tag}")
+
+                        st.markdown("#### Per-SNP consensus")
+                        snp_rows = []
+                        for snp_name, cons in di_result['snp_consensus'].items():
+                            votes_str = ", ".join(f"{z}:{n}" for z, n in cons['votes'].items()) or "–"
+                            snp_rows.append({
+                                'SNP': snp_name,
+                                'Consensus': cons['consensus'],
+                                'Call': cons.get('call', '–'),
+                                'Confidence': cons['confidence'],
+                                'Reads covering': cons['reads_covering'],
+                                'Votes': votes_str,
+                                'Discordant reads': ', '.join(cons['discordant_reads']) or '–',
+                            })
+                        st.dataframe(pd.DataFrame(snp_rows),
+                                     hide_index=True, use_container_width=True)
+
+                        with st.expander("📋 Per-read details"):
+                            for read in di_result['per_read_details']:
+                                st.markdown(f"**{read['read_id']}** — "
+                                            f"strand={read['strand']}, "
+                                            f"identity={read['identity']}%, "
+                                            f"length={read['query_length']} bp, "
+                                            f"callable={read['callable']}")
+                                st.caption(read['reason'])
+                                read_rows = []
+                                for snp_name, call in read['snp_calls'].items():
+                                    if call.get('covered'):
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': call.get('call'),
+                                            'Zygosity': call.get('zygosity', '–'),
+                                            'Query base': call.get('query_base', '–'),
+                                        })
+                                    else:
+                                        read_rows.append({
+                                            'SNP': snp_name,
+                                            'Call': 'not covered',
+                                            'Zygosity': '–',
+                                            'Query base': '–',
+                                        })
+                                st.dataframe(pd.DataFrame(read_rows),
+                                             hide_index=True, use_container_width=True)
 
 
 else:

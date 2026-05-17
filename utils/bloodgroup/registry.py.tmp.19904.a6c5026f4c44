@@ -1,0 +1,115 @@
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
+
+from utils.FASTA_analyzer import FASTAAlignmentService
+from utils.abo_identifier import ABOIdentifier
+from utils.rhd_analyzer import RHDAnalyzer
+from utils.rhce_analyzer import RHCEAnalyzer
+from utils.kel_analyzer import KELAnalyzer
+from utils.fy_analyzer import FYAnalyzer
+
+
+@dataclass
+class BloodGroupSystemConfig:
+    key: str
+    display_name: str
+    description: str
+    upload_types: List[str]
+    accepts_multiple_files: bool
+    analyzer_factory: Optional[Callable[[], Any]] = None
+    analyze_method: Optional[Callable[[Any, str], Any]] = None
+    identifier_factory: Optional[Callable[[], Any]] = None
+
+
+_system_registry: Dict[str, BloodGroupSystemConfig] = {}
+
+
+def register_system(config: BloodGroupSystemConfig) -> BloodGroupSystemConfig:
+    _system_registry[config.key] = config
+    return config
+
+
+def get_system(key: str) -> Optional[BloodGroupSystemConfig]:
+    return _system_registry.get(key)
+
+
+def get_available_system_keys() -> List[str]:
+    return list(_system_registry.keys())
+
+
+def analyze_abo(analyzer: Any, query_sequence: str) -> Any:
+    return analyzer.identify_variants(query_sequence)
+
+
+def analyze_rhd(analyzer: Any, query_sequence: str) -> Any:
+    return analyzer.analyze(query_sequence)
+
+
+def analyze_rhce(analyzer: Any, query_sequence) -> Any:
+    """RHCE accepts a single sequence string OR a list of (id, seq) reads
+    for multi-read consensus voting."""
+    return analyzer.analyze(query_sequence)
+
+
+def analyze_kel(analyzer: Any, query_sequence) -> Any:
+    """KEL accepts a single sequence string OR a list of (id, seq) reads
+    for multi-read consensus voting."""
+    return analyzer.analyze(query_sequence)
+
+
+def analyze_fy(analyzer: Any, query_sequence) -> Any:
+    """FY (Duffy) accepts a single sequence string OR a list of (id, seq)
+    reads for multi-read consensus voting."""
+    return analyzer.analyze(query_sequence)
+
+
+# Register supported systems here.
+# Future systems can be added by adding a new BloodGroupSystemConfig entry.
+register_system(
+    BloodGroupSystemConfig(
+        key="ABO",
+        display_name="ABO",
+        description="Exon-based ABO blood group analysis using reference exon sequences.",
+        upload_types=["fasta", "fa", "txt"],
+        accepts_multiple_files=True,
+        analyzer_factory=lambda: FASTAAlignmentService(gene="ABO"),
+        analyze_method=analyze_abo,
+        identifier_factory=lambda: ABOIdentifier("ABO")
+    )
+)
+
+register_system(
+    BloodGroupSystemConfig(
+        key="RHD",
+        display_name="RHD",
+        description="Full RHD sequence analysis using GenBank reference and variant calling.",
+        upload_types=["fasta", "fa", "ab1"],
+        accepts_multiple_files=False,
+        analyzer_factory=lambda: RHDAnalyzer(),
+        analyze_method=analyze_rhd,
+    )
+)
+
+register_system(
+    BloodGroupSystemConfig(
+        key="RHCE",
+        display_name="RHCE",
+        description="RHCE (C/c and E/e) multi-read consensus genotyping with ISBT haplotype mapping.",
+        upload_types=["fasta", "fa", "ab1"],
+        accepts_multiple_files=True,
+        analyzer_factory=lambda: RHCEAnalyzer(),
+        analyze_method=analyze_rhce,
+    )
+)
+
+register_system(
+    BloodGroupSystemConfig(
+        key="KEL",
+        display_name="Kell",
+        description="Kell (K/k) multi-read consensus genotyping via c.578C>T with ISBT haplotype mapping.",
+        upload_types=["fasta", "fa", "ab1"],
+        accepts_multiple_files=True,
+        analyzer_factory=lambda: KELAnalyzer(),
+        analyze_method=analyze_kel,
+    )
+)

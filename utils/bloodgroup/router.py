@@ -1,0 +1,272 @@
+"""Per-read routing for the unified-input pipeline.
+
+Aligns each uploaded read against every blood-group system's reference,
+picks the best match by local-alignment identity, and classifies the
+decision so the UI can surface ambiguous reads for human override.
+
+SKETCH ONLY — wiring into main.py (replacing the per-system uploaders with
+one drag-and-drop box, then dispatching routed reads to each analyzer's
+`analyze()` method) is not implemented here.
+
+Routing model
+-------------
+For each read:
+  1. Local-align (forward + reverse complement) against each system's
+     reference. ABO is multi-exon so its score is the best identity across
+     any exon.
+  2. Sort candidates by identity %.
+  3. Classify:
+       - "routed"    : top >= MIN_ROUTE_IDENTITY  AND  margin >= MIN_ROUTE_MARGIN
+       - "ambiguous" : top >= MIN_ROUTE_IDENTITY  AND  margin <  MIN_ROUTE_MARGIN
+       - "unknown"   : top <  MIN_ROUTE_IDENTITY
+
+The margin gate exists because RHD and RHCE share ~90% sequence identity;
+a short Sanger amplicon can hit both. The UI is expected to render the
+full candidate list for "ambiguous" rows and let the user pick.
+"""
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+from Bio.Align import PairwiseAligner
+from Bio.Seq import Seq
+
+from utils.rhd_analyzer import RHDAnalyzer
+from utils.rhce_analyzer import RHCEAnalyzer
+from utils.kel_analyzer import KELAnalyzer
+from utils.FASTA_analyzer import FASTAAlignmentService
+
+
+# ─── Routing thresholds ──────────────────────────────────────────────────
+MIN_ROUTE_IDENTITY = 90.0   # below this -> "unknown"
+MIN_ROUTE_MARGIN = 5.0      # top minus runner-up below this -> "ambiguous"
+
+
+# ─── Filename-based routing (fast path for lab-named amplicons) ──────────
+# Maps a substring found in the uploaded filename to a blood-group system
+# key. The order matters: longer / more specific prefixes must come first
+# so e.g. RHCE doesn't false-positive as RHD (since 'RHD' isn't a substring
+# of 'RHCE', actually safe, but 'RHCE' must come before generic 'RH').
+_FILENAME_ROUTE_PATTERNS: list = [
+    # (substring to match, system key)
+    ('RHCE',  'RHCE'),    # RHCE1, RHCE2, RHCE45
+    ('RHD',   'RHD'),     # RHD1, RHD456
+    ('ABO',   'ABO'),
+    ('MIA',   'MNS'),     # MIA234 (Miltenberger amplicon -> MNS)
+    ('MNS',   'MNS'),
+    ('GYPA',  'MNS'),
+    ('GYPB',  'MNS'),
+    ('DI1819', 'DI'),     # full DI prefix; specific to avoid catching 'di' substring
+    ('SLC4A1', 'DI'),
+    ('KEL',   'KEL'),     # KEL56
+    ('FY12',  'FY'),      # specific FY amplicon
+    ('ACKR1', 'FY'),      # alt gene name
+    ('DARC',  'FY'),
+    ('JK78',  'JK'),
+    ('JK89',  'JK'),
+    ('SLC14A1', 'JK'),
+    ('FUT1',  'H'),       # H system gene
+    ('BOMBAY', 'H'),
+    ('_H_',   'H'),       # H amplicons with explicit _H_ tag
+]
+
+
+def route_filename(filename: str) -> Optional[str]:
+    """Route a file to a blood-group system by matching its filename against
+    lab amplicon-naming conventions.
+
+    Returns the system key (e.g. 'RHD', 'MNS', 'DI') or None if no pattern
+    matches. Case-insensitive. The system keys returned match the registry
+    keys in `utils/bloodgroup/registry.py`.
+
+    Examples:
+        >>> route_filename("TSN20251010-010-00025_KEL56-NP_...ab1")
+        'KEL'
+        >>> route_filename("MIA234-1_amplicon.fasta")
+        'MNS'
+        >>> route_filename("random.fasta")
+        None
+    """
+    if not filename:
+        return None
+    upper = filename.upper()
+    for pattern, system in _FILENAME_ROUTE_PATTERNS:
+        if pattern in upper:
+            return system
+    return None
+
+
+def route_files_by_filename(filenames) -> dict:
+    """Group a list of filenames by their routed blood-group system.
+
+    Returns ``{system: [filename, ...], '_unrouted': [filename, ...]}``.
+    The '_unrouted' key collects files whose names didn't match any pattern.
+    """
+    grouped: dict = {}
+    for fn in filenames:
+        system = route_filename(fn) or '_unrouted'
+        grouped.setdefault(system, []).append(fn)
+    return grouped
+
+
+@dataclass
+class CandidateScore:
+    system: str           # "ABO" | "RHD" | "RHCE" | "KEL"
+    identity: float       # 0-100
+    strand: str           # "forward" | "reverse"
+    aligned_bases: int    # sanity-check: how much of the read actually matched
+
+
+@dataclass
+class RoutingDecision:
+    read_id: str
+    sequence: str
+    decision: str                              # "routed" | "ambiguous" | "unknown"
+    best: Optional[CandidateScore]
+    runner_up: Optional[CandidateScore]
+    all_scores: list = field(default_factory=list)   # sorted desc by identity
+    note: str = ""                             # human-readable summary
+
+
+# ─── Internals ───────────────────────────────────────────────────────────
+def _build_aligner() -> PairwiseAligner:
+    """Same scoring as the per-system analyzers, so routing identity is
+    comparable to the downstream analysis identity."""
+    aligner = PairwiseAligner()
+    aligner.mode = 'local'
+    aligner.match_score = 2
+    aligner.mismatch_score = -1
+    aligner.open_gap_score = -5
+    aligner.extend_gap_score = -0.5
+    return aligner
+
+
+def _identity(alignment) -> tuple[float, int]:
+    ref_a, query_a = str(alignment[0]), str(alignment[1])
+    matches = aligned = 0
+    for r, q in zip(ref_a, query_a):
+        if r == '-' or q == '-':
+            continue
+        aligned += 1
+        if r.upper() == q.upper():
+            matches += 1
+    if aligned == 0:
+        return 0.0, 0
+    return (matches / aligned) * 100.0, aligned
+
+
+def _score_against_reference(
+    aligner: PairwiseAligner,
+    query: str,
+    reference: str,
+) -> tuple[float, int, str]:
+    """Best of (forward, reverse-complement) against one reference."""
+    best = (0.0, 0, 'forward')
+    for strand, q in (('forward', query),
+                      ('reverse', str(Seq(query).reverse_complement()))):
+        try:
+            aln = aligner.align(reference, q)[0]
+        except (ValueError, IndexError, OverflowError):
+            continue
+        ident, n = _identity(aln)
+        if ident > best[0]:
+            best = (ident, n, strand)
+    return best
+
+
+def _load_system_references() -> dict[str, list[str]]:
+    """One or more representative references per system. Lazily-loaded —
+    analyzers with missing reference files are simply omitted (they can't
+    be routed to anyway).
+
+    ABO's value is a list (one entry per exon); the routing score takes
+    the best identity across any exon. RHD/RHCE/KEL expose a single
+    `reference_seq` so their list has one element.
+    """
+    refs: dict[str, list[str]] = {}
+
+    rhd = RHDAnalyzer()
+    if getattr(rhd, 'reference_seq', None):
+        refs['RHD'] = [rhd.reference_seq]
+
+    rhce = RHCEAnalyzer()
+    if rhce.is_loaded():
+        refs['RHCE'] = [rhce.reference_seq]
+
+    kel = KELAnalyzer()
+    if kel.is_loaded():
+        refs['KEL'] = [kel.reference_seq]
+
+    try:
+        abo = FASTAAlignmentService(gene="ABO")
+        abo_exons = abo.getABO_ref("exons") or []
+        if abo_exons:
+            refs['ABO'] = [e['sequence'] for e in abo_exons]
+    except Exception:
+        pass  # ABO references unavailable -> just skip it as a route target
+
+    return refs
+
+
+# ─── Public API ──────────────────────────────────────────────────────────
+def route_read(
+    read_id: str,
+    sequence: str,
+    references: dict[str, list[str]],
+    aligner: Optional[PairwiseAligner] = None,
+) -> RoutingDecision:
+    """Classify one read by aligning it against every system's reference."""
+    aligner = aligner or _build_aligner()
+    seq = sequence.upper()
+
+    scores: list[CandidateScore] = []
+    for system, ref_list in references.items():
+        best = (0.0, 0, 'forward')
+        for ref in ref_list:
+            ident, n, strand = _score_against_reference(aligner, seq, ref)
+            if ident > best[0]:
+                best = (ident, n, strand)
+        scores.append(CandidateScore(system, *best))
+
+    scores.sort(key=lambda s: s.identity, reverse=True)
+    top = scores[0] if scores else None
+    runner = scores[1] if len(scores) > 1 else None
+
+    if not top or top.identity < MIN_ROUTE_IDENTITY:
+        decision = 'unknown'
+        note = (f"Top identity {top.identity:.1f}% < {MIN_ROUTE_IDENTITY}% — "
+                "no system matched confidently.") if top else "No alignment produced."
+    elif runner and (top.identity - runner.identity) < MIN_ROUTE_MARGIN:
+        decision = 'ambiguous'
+        note = (f"{top.system} {top.identity:.1f}% vs "
+                f"{runner.system} {runner.identity:.1f}% "
+                f"(margin {top.identity - runner.identity:.1f}pp < "
+                f"{MIN_ROUTE_MARGIN}pp) — manual override recommended.")
+    else:
+        decision = 'routed'
+        runner_str = (f" (runner-up {runner.system} {runner.identity:.1f}%)"
+                      if runner else "")
+        note = f"Routed to {top.system} at {top.identity:.1f}%{runner_str}."
+
+    return RoutingDecision(
+        read_id=read_id,
+        sequence=sequence,
+        decision=decision,
+        best=top,
+        runner_up=runner,
+        all_scores=scores,
+        note=note,
+    )
+
+
+def route_reads(reads: list[tuple[str, str]]) -> list[RoutingDecision]:
+    """Route a batch of (read_id, sequence) tuples.
+
+    References are loaded once, the aligner is reused across reads. Returns
+    one RoutingDecision per input read, in input order. Caller groups by
+    `decision.best.system` to build the per-system input lists for the
+    downstream analyzers.
+    """
+    references = _load_system_references()
+    aligner = _build_aligner()
+    return [route_read(rid, seq, references, aligner) for rid, seq in reads]

@@ -1,0 +1,558 @@
+LOCUS       NG_007510              14380 bp    DNA     linear   PRI 04-FEB-2026
+DEFINITION  Homo sapiens fucosyltransferase 1 (H blood group) (FUT1),
+            RefSeqGene (LRG_810) on chromosome 19.
+ACCESSION   NG_007510
+VERSION     NG_007510.2
+KEYWORDS    RefSeq; RefSeqGene.
+SOURCE      Homo sapiens (human)
+  ORGANISM  Homo sapiens
+            Eukaryota; Metazoa; Chordata; Craniata; Vertebrata; Euteleostomi;
+            Mammalia; Eutheria; Euarchontoglires; Primates; Haplorrhini;
+            Catarrhini; Hominidae; Homo.
+COMMENT     REVIEWED REFSEQ: This record has been curated by NCBI staff in
+            collaboration with Jill R. Storry. The reference sequence was
+            derived from AC009002.5 and KF456598.1.
+            This sequence is a reference standard in the RefSeqGene project.
+            
+            On Jul 29, 2016 this sequence version replaced NG_007510.1.
+            
+            Summary: This gene encodes a Golgi stack membrane protein that is
+            involved in the creation of a precursor of the H antigen, which is
+            required for the final step in the synthesis of soluble A and B
+            antigens. This is one of two genes encoding the galactoside
+            2-L-fucosyltransferase enzyme. Mutations in this gene are a cause
+            of the H-Bombay blood group. [provided by RefSeq, Aug 2016].
+PRIMARY     REFSEQ_SPAN         PRIMARY_IDENTIFIER PRIMARY_SPAN        COMP
+            1-3465              AC009002.5         7538-11002
+            3466-3749           KF456598.1         1-284
+            3750-14380          AC009002.5         11287-21917
+FEATURES             Location/Qualifiers
+     source          1..14380
+                     /organism="Homo sapiens"
+                     /mol_type="genomic DNA"
+                     /db_xref="taxon:9606"
+                     /chromosome="19"
+                     /map="19q13.33"
+     gene            complement(2061..4867)
+                     /gene="FGF21"
+                     /note="fibroblast growth factor 21"
+                     /db_xref="GeneID:26291"
+                     /db_xref="HGNC:HGNC:3678"
+                     /db_xref="MIM:609436"
+     mRNA            complement(join(2061..2461,3362..3465,3920..4500,
+                     4607..4867))
+                     /gene="FGF21"
+                     /product="fibroblast growth factor 21"
+                     /transcript_id="NM_019113.4"
+                     /db_xref="GeneID:26291"
+                     /db_xref="HGNC:HGNC:3678"
+                     /db_xref="MIM:609436"
+     CDS             complement(join(2171..2461,3362..3465,3920..4154))
+                     /gene="FGF21"
+                     /codon_start=1
+                     /product="fibroblast growth factor 21 precursor"
+                     /protein_id="NP_061986.1"
+                     /db_xref="CCDS:CCDS12734.1"
+                     /db_xref="GeneID:26291"
+                     /db_xref="HGNC:HGNC:3678"
+                     /db_xref="MIM:609436"
+                     /translation="MDSDETGFEHSGLWVSVLAGLLLGACQAHPIPDSSPLLQFGGQV
+                     RQRYLYTDDAQQTEAHLEIREDGTVGGAADQSPESLLQLKALKPGVIQILGVKTSRFL
+                     CQRPDGALYGSLHFDPEACSFRELLLEDGYNVYQSEAHGLPLHLPGNKSPHRDPAPRG
+                     PARFLPLPGLPPALPEPPGILAPQPPDVGSSDPLSMVGPSQGRSPSYAS"
+     sig_peptide     complement(4071..4154)
+                     /gene="FGF21"
+                     /note="/evidence=ECO:0000269|PubMed:15340161; propagated
+                     from UniProtKB/Swiss-Prot (Q9NSA1.1)"
+     mat_peptide     complement(join(2174..2461,3362..3465,3920..4070))
+                     /gene="FGF21"
+                     /product="Fibroblast growth factor 21. /id=PRO_0000008994"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q9NSA1.1)"
+     misc_feature    complement(2174..2374)
+                     /gene="FGF21"
+                     /note="propagated from UniProtKB/Swiss-Prot (Q9NSA1.1);
+                     Region: Disordered. /evidence=ECO:0000256|SAM:MobiDB-lite"
+     gene            5033..12380
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="fucosyltransferase 1 (H blood group)"
+                     /db_xref="GeneID:2523"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+     mRNA            join(5033..5101,6828..7066,7269..7901,9108..12380)
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /product="fucosyltransferase 1 (H blood group), transcript
+                     variant 1"
+                     /transcript_id="NM_000148.4"
+                     /db_xref="GeneID:2523"
+                     /db_xref="LRG:t1"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+     exon            5033..5101
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=1
+     mRNA            join(6731..6743,6828..7066,7269..7499,7666..7901,
+                     9108..12380)
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /product="fucosyltransferase 1 (H blood group), transcript
+                     variant 2"
+                     /transcript_id="NM_001329877.1"
+                     /db_xref="GeneID:2523"
+                     /db_xref="LRG:t2"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+     exon            6731..6743
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=2
+     exon            6828..7066
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=3
+     exon            7269..7901
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=4b
+     exon            7269..7499
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=4a
+     exon            7666..7901
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=4c
+     mRNA            join(7750..7901,9108..12380)
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /product="fucosyltransferase 1 (H blood group), transcript
+                     variant 3"
+                     /transcript_id="NM_001384359.1"
+                     /db_xref="GeneID:2523"
+                     /db_xref="LRG:t3"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+     exon            7750..7901
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=4d
+     exon            9108..12380
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /inference="alignment:Splign:2.1.0"
+                     /number=5
+     CDS             9110..10207
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /EC_number="2.4.1.69"
+                     /EC_number="2.4.1.344"
+                     /note="blood group H alpha 2-fucosyltransferase;
+                     nonfunctional fucosyltransferase 1; alpha(1,2)
+                     fucosyltransferase 1; GDP-L-fucose:beta-D-galactoside
+                     2-alpha-L-fucosyltransferase 1; type 1 galactoside
+                     alpha-(1,2)-fucosyltransferase FUT1; alpha(1,2)FT 1; H
+                     glycosyltransferase; H glycosytransferase; type 2
+                     galactoside alpha-(1,2)-fucosyltransferase FUT1;
+                     galactoside 2-L-fucosyltransferase enzyme; H antigen; a-1,
+                     2 fucosyltransferase (H antigen)"
+                     /codon_start=1
+                     /product="galactoside alpha-(1,2)-fucosyltransferase 1"
+                     /protein_id="NP_001316806.1"
+                     /db_xref="CCDS:CCDS12733.1"
+                     /db_xref="GeneID:2523"
+                     /db_xref="LRG:p2"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+                     /translation="MWLRSHRQLCLAFLLVCVLSVIFFLHIHQDSFPHGLGLSILCPD
+                     RRLVTPPVAIFCLPGTAMGPNASSSCPQHPASLSGTWTVYPNGRFGNQMGQYATLLAL
+                     AQLNGRRAFILPAMHAALAPVFRITLPVLAPEVDSRTPWRELQLHDWMSEEYADLRDP
+                     FLKLSGFPCSWTFFHHLREQIRREFTLHDHLREEAQSVLGQLRLGRTGDRPRTFVGVH
+                     VRRGDYLQVMPQRWKGVVGDSAYLRQAMDWFRARHEAPVFVVTSNGMEWCKENIDTSQ
+                     GDVTFAGDGQEATPWKDFALLTQCNHTIMTIGTFGFWAAYLAGGDTVYLANFTLPDSE
+                     FLKIFKPEAAFLPEWVGINADLSPLWTLAKP"
+     misc_feature    9134..9184
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="propagated from UniProtKB/Swiss-Prot (P19526.1);
+                     transmembrane region"
+     misc_feature    9302..9304
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (P19526.1); glycosylation site"
+     misc_feature    10088..10090
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (P19526.1); glycosylation site"
+     CDS             9110..10207
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /EC_number="2.4.1.69"
+                     /EC_number="2.4.1.344"
+                     /note="blood group H alpha 2-fucosyltransferase;
+                     nonfunctional fucosyltransferase 1; alpha(1,2)
+                     fucosyltransferase 1; GDP-L-fucose:beta-D-galactoside
+                     2-alpha-L-fucosyltransferase 1; type 1 galactoside
+                     alpha-(1,2)-fucosyltransferase FUT1; alpha(1,2)FT 1; H
+                     glycosyltransferase; H glycosytransferase; type 2
+                     galactoside alpha-(1,2)-fucosyltransferase FUT1;
+                     galactoside 2-L-fucosyltransferase enzyme; H antigen; a-1,
+                     2 fucosyltransferase (H antigen)"
+                     /codon_start=1
+                     /product="galactoside alpha-(1,2)-fucosyltransferase 1"
+                     /protein_id="NP_001371288.1"
+                     /db_xref="CCDS:CCDS12733.1"
+                     /db_xref="GeneID:2523"
+                     /db_xref="LRG:p3"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+                     /translation="MWLRSHRQLCLAFLLVCVLSVIFFLHIHQDSFPHGLGLSILCPD
+                     RRLVTPPVAIFCLPGTAMGPNASSSCPQHPASLSGTWTVYPNGRFGNQMGQYATLLAL
+                     AQLNGRRAFILPAMHAALAPVFRITLPVLAPEVDSRTPWRELQLHDWMSEEYADLRDP
+                     FLKLSGFPCSWTFFHHLREQIRREFTLHDHLREEAQSVLGQLRLGRTGDRPRTFVGVH
+                     VRRGDYLQVMPQRWKGVVGDSAYLRQAMDWFRARHEAPVFVVTSNGMEWCKENIDTSQ
+                     GDVTFAGDGQEATPWKDFALLTQCNHTIMTIGTFGFWAAYLAGGDTVYLANFTLPDSE
+                     FLKIFKPEAAFLPEWVGINADLSPLWTLAKP"
+     misc_feature    9134..9184
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="propagated from UniProtKB/Swiss-Prot (P19526.1);
+                     transmembrane region"
+     misc_feature    9302..9304
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (P19526.1); glycosylation site"
+     misc_feature    10088..10090
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (P19526.1); glycosylation site"
+     CDS             9110..10207
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /EC_number="2.4.1.69"
+                     /EC_number="2.4.1.344"
+                     /note="blood group H alpha 2-fucosyltransferase;
+                     nonfunctional fucosyltransferase 1; alpha(1,2)
+                     fucosyltransferase 1; GDP-L-fucose:beta-D-galactoside
+                     2-alpha-L-fucosyltransferase 1; type 1 galactoside
+                     alpha-(1,2)-fucosyltransferase FUT1; alpha(1,2)FT 1; H
+                     glycosyltransferase; H glycosytransferase; type 2
+                     galactoside alpha-(1,2)-fucosyltransferase FUT1;
+                     galactoside 2-L-fucosyltransferase enzyme; H antigen; a-1,
+                     2 fucosyltransferase (H antigen)"
+                     /codon_start=1
+                     /product="galactoside alpha-(1,2)-fucosyltransferase 1"
+                     /protein_id="NP_000139.1"
+                     /db_xref="CCDS:CCDS12733.1"
+                     /db_xref="GeneID:2523"
+                     /db_xref="LRG:p1"
+                     /db_xref="HGNC:HGNC:4012"
+                     /db_xref="MIM:211100"
+                     /translation="MWLRSHRQLCLAFLLVCVLSVIFFLHIHQDSFPHGLGLSILCPD
+                     RRLVTPPVAIFCLPGTAMGPNASSSCPQHPASLSGTWTVYPNGRFGNQMGQYATLLAL
+                     AQLNGRRAFILPAMHAALAPVFRITLPVLAPEVDSRTPWRELQLHDWMSEEYADLRDP
+                     FLKLSGFPCSWTFFHHLREQIRREFTLHDHLREEAQSVLGQLRLGRTGDRPRTFVGVH
+                     VRRGDYLQVMPQRWKGVVGDSAYLRQAMDWFRARHEAPVFVVTSNGMEWCKENIDTSQ
+                     GDVTFAGDGQEATPWKDFALLTQCNHTIMTIGTFGFWAAYLAGGDTVYLANFTLPDSE
+                     FLKIFKPEAAFLPEWVGINADLSPLWTLAKP"
+     misc_feature    9134..9184
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="propagated from UniProtKB/Swiss-Prot (P19526.1);
+                     transmembrane region"
+     misc_feature    9302..9304
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (P19526.1); glycosylation site"
+     misc_feature    10088..10090
+                     /gene="FUT1"
+                     /gene_synonym="H; HH; HSC"
+                     /note="N-linked (GlcNAc...) asparagine.
+                     /evidence=ECO:0000255; propagated from
+                     UniProtKB/Swiss-Prot (P19526.1); glycosylation site"
+     gene            13482..>14380
+                     /gene="IZUMO1"
+                     /gene_synonym="IZUMO; OBF"
+                     /note="izumo sperm-oocyte fusion 1"
+                     /db_xref="GeneID:284359"
+                     /db_xref="HGNC:HGNC:28539"
+                     /db_xref="MIM:609278"
+     mRNA            13482..>13956
+                     /gene="IZUMO1"
+                     /gene_synonym="IZUMO; OBF"
+                     /product="izumo sperm-oocyte fusion 1, transcript variant
+                     1"
+                     /transcript_id="NM_182575.3"
+                     /db_xref="GeneID:284359"
+                     /db_xref="HGNC:HGNC:28539"
+                     /db_xref="MIM:609278"
+     mRNA            13482..>13663
+                     /gene="IZUMO1"
+                     /gene_synonym="IZUMO; OBF"
+                     /product="izumo sperm-oocyte fusion 1, transcript variant
+                     2"
+                     /transcript_id="NM_001321864.1"
+                     /db_xref="GeneID:284359"
+                     /db_xref="HGNC:HGNC:28539"
+                     /db_xref="MIM:609278"
+ORIGIN      
+        1 aaacaaacaa acaaataaat aaaagtaaac gccgggtgca gtatctcacg cctgtaatcc
+       61 cagcactttg agaggccaag gtgggcagat cacttgaggt caagaatttg agaccagcct
+      121 gaccaacatg gtgaaacccc gtctctacta aaaacacaaa aattagctgg ccatagtggt
+      181 ggtgcctgta atcctagcta ctccagagct gagaatcgct taagcccagg agacagaggt
+      241 ggcagtgaac caagattgtg ccactgcact ccagcctggg caacagagcg agactctgtc
+      301 tcaaaaaaca agcagccagg cgtggtggct cacgcctata accccagcac tttgggaggc
+      361 tgaggcgggc ggatcacctg aggtggggag ttcgagacca gcctgaccaa catggagaaa
+      421 ccccatctct actaaaaata caaaattatc tgggcatggt ggcgcatgcc cataatccca
+      481 gctactcggg aggctgaggc aggagaatca cttgaagccg ggaggcggag attgtggtga
+      541 gccgagattg tgccattgca ctccagcctt ggcaacaaga gggaaactct gtctcaaaac
+      601 aaacaaacaa gcaatcaaac aaacaaacgg gtgtggtggc gcttgtctgt agtcccagct
+      661 actcgggagg ctaaggcagg agaatcgctt gaacccagga gacggaggtt gcagggagcc
+      721 gagattgtgc cactgcactt gggcctggtg acagagcgag actccatctc agaaaaaaaa
+      781 caaaataaga taaataaata aataaatatt aaaaagttca taaggaccca gatggaagaa
+      841 ttccaggttt cagctccttt tcctgagaac ccaaactccc accctccagc cccttttttc
+      901 tcagaccagg atgcctaagt ctgcagtccc cagttctcct gtgatccagg tgtccagatg
+      961 tccagcccac tgattcccca gaacttgggt gttacactag ccccaaacct actccaggac
+     1021 ccaggagtcc ttgtcccaga tttgaggccc aacagatctc attcctgctg ctaaatgatg
+     1081 ccagaaaact acatctccca tgaggatgtg agtgtgctgt gtcacctcgt aaaagctccc
+     1141 ctgttatcga ggtagctcta tgaaatagtt acacaacgct cacacaagtt gaggggttgt
+     1201 agaaagaagt cctgctcttt cattttattt ttatatttat ttatttattt atttatttat
+     1261 ttattttttt gagatggaat ctcgctctgt ggcctgggct ggagtgcagt ggcgcgatct
+     1321 cggctcactg caagctccgc ctcccgcatt cacgccattc tgcctcagcc tccggagtag
+     1381 ctgggactac aggcgcccgc caccacgccc agctaatttt gtttttgtat ttttagtaga
+     1441 gacggggttt catcgtatta gccaggatag tctcaatctc ctgacctcgt gatccacctg
+     1501 cctcggcctc ccaaagtgct gggattacag gcgtaagcca ccactcccgg ccagtcttgt
+     1561 cctttcagag agcagggata gtccacagtc cctggggaca ctttagcaga gtagaaaagt
+     1621 gaggctgggc tgggcacagt gactcaagcc tgtaatccca gcactttggg aggccaaggc
+     1681 aggcaggtca tgaagtcaag agatggagag catcctggcc aacatggcga aaccctgtct
+     1741 ctactaaaat tacaaaatta gctgggtgtg gtggcgcacg cctgtaatca cagctactcg
+     1801 ggtggctgag gcaggagaat tgcttgaacc tgggaggcgg aggttggagt gagccaagat
+     1861 cgcgccactg cactccagcc tgggtgacag agcgagactc cgtctcaaaa aaaaaaaaag
+     1921 aaaagaaaag aaaaaagtga ggcccagtgg gaagccagga ccctcggacc acgtgagggg
+     1981 aggtgtagag gggattgtcc gggccaaggg agacaaaaca gctgccatgt cttccctcag
+     2041 acactcacac atgctcattc ttatcctcct ctggaactct ttattatctc aagtaagaaa
+     2101 aataaaaaaa taaataagat aaataaccta ataaataaag aggagatgtc atagtaaaca
+     2161 gcctctggct tcaggaagcg tagctggggc ttcggccctg ggaaggtccc accatgctca
+     2221 gagggtccga ggagcccaca tcggggggct ggggggccag gattccgggt ggctccggga
+     2281 gtgcgggggg caggcctggt agtggcagga agcgagctgg tcctcggggt gcagggtccc
+     2341 ggtgtgggga cttgttccct ggcaggtgca gcgggaggcc gtgggcttcg gactggtaaa
+     2401 cattgtatcc gtcctcaaga agcagctccc ggaagctgca ggcctcaggg tcaaagtgga
+     2461 gctaggggac aaaaacagga tcagagacag ggttcctctg ttttcctgat gtaagaccca
+     2521 ggatccaggc cccagccctg cctccctcag acccaggggt ccaggccccc agcgcctcct
+     2581 ccctcagacc caggggtcca gaccctagtt tctcctccat ccgacccagg agtccaggcc
+     2641 cccagcgcct cctccctcag acccggggtt ccaggcccca gcctctcctc cctcagaccc
+     2701 ggggttccag gccccagcct ctcctccctc agacccgggg ttccaggccc cagcccctcc
+     2761 tccctcagac ccaggggtcc aggcccccag cccctcctcc ctcagaccca ggagtccagg
+     2821 cccccagccc ctcctctagg aaacaaaaca gcaaggcagg ttttgttttt taccccaggg
+     2881 ctctcctgca gggacctgcc tcccagttca gacttcacag agaacattcc agccctcgga
+     2941 gccatcagtg ctctctcagg ccaggcgggg tgtctcccta gcactcaagg tcctggtcac
+     3001 tttactggcc atggcttccc cgagtgtccc tgtgcccagc atgagccgtg cacacagggg
+     3061 ccgtgtgggc aggagcaggg gttactgaat cacgagactc ccaataacct gagcctcagg
+     3121 ccgctccagc atccacacat cacatgattg aggtcactgg cgccccggcc tgggcctcag
+     3181 tttcctcatc ttgcaaacac tgatgacaac ttcaacctcc aaatgttgca gctgggggcg
+     3241 tgcagagcaa atagaatcaa gtctggctcc gggggggatg agcaagacaa ggcaccccag
+     3301 gctgtgaggg cgacatatag gaggagcatg gtgggtggtg aggagggtcc tggaaactca
+     3361 ccgatccata cagggcccca tctggccgct ggcacaggaa cctggatgtc ttgactccca
+     3421 agatttgaat aactcccggc ttcaaggctt tcagctgcag gagacctaag gggtgaaagc
+     3481 gataaggtgg ttcgaggacc tctcccaccc gggactgtcc caccacccga ctctgtccca
+     3541 ccatccggct ctgtcccagc cctgggagtc caagcccaca gcctacctcc tccctcagac
+     3601 ccaggagaag cccaagccaa agccccctcc caactcagac ccaagagtcc aggaccccag
+     3661 cccttcctcc ttcaaaccca agagtccaga cccccagccc ctcctccctc agacccaggg
+     3721 gtccagaccc agcccctcct ccctcagacc caggggccca gatccccagc ccctcctccc
+     3781 tcagacccag gagtccagat ccccagcccc tcctccctca gacccagggg ccaaggcccc
+     3841 cagcccctcc tccctcagac ccaggaatcc agacccacag cccctcctcc ctcagaccca
+     3901 ggctctggcc cacactcact ttcggggctc tggtcagcag cgccccccac cgtcccatcc
+     3961 tccctgatct ccaggtgggc ttctgtctgc tgggcatcat ctgtgtagag gtaccgctgc
+     4021 cggacttggc ccccgaattg caggagagga ctggagtcag ggatggggtg tgcctggcag
+     4081 gctcccagca gaagaccagc cagcacagaa acccacagtc ctgagtgctc gaacccggtc
+     4141 tcgtccgagt ccatcaatgg ctcgggtcct caggtgatct ccggggtgtg agctcggaga
+     4201 agctgagtgg tttagaattg gtgccagatt ccagttgtcc aggtgagtag actcaggtgg
+     4261 cctgagtgcc tggctcctct ttcggctgga tcctcagctg acagaacacc cttgtttttt
+     4321 gggatagatg cagaagctcc agaatttata cccagacagg cccgcccaat caccctccct
+     4381 gcgcctgaac catgatattt gacccatttg gcaggagcta cagaattcca tcgtggcaag
+     4441 ggcagcctga atggatgatg taacctgggg tcctttcaat ggagggccag actcctgggt
+     4501 ctaggggatg agggagggga ggatcgggtt agctgggacc caggtgaaag gggctggggg
+     4561 cccacattcc tgagtctcag agagaaggat ctggggtctc aagcacctga gtcggaggga
+     4621 ggaggggtgc tgggctcctg gaaaaaccac ctcttggacc atctatgcag atcacgcaga
+     4681 acaagagaaa tttctgcgcc ccatctgaat ttctaagttt ggggggaggg cgtgatctga
+     4741 cactgaggtt ccttgatcct cagcaaggcg gcaattgctg tatgaaagaa gcgaccgcat
+     4801 ctgagacaca agtatcctgc cttggaagcc tctcacctgg ccgtgggcca acctcaacct
+     4861 catctgtccc tgctcagatg ctcagaccct ggacatccca gcctcctcct ccctgatgca
+     4921 atcctggtgt ttctttcacc agagaagcca tcccaggccc aggcaggtgc tcctgaaata
+     4981 acctgggggg aggggtggct gaaagtccct gactggagtt ggcagccaag ccaggccctg
+     5041 gagtgggcac ccagagggaa gacaggttgg ctaatttcct ggagccccta agggtgcaag
+     5101 ggtaggcctt ctgtgtctga gggaggaggg ctggggctct ggactcctgg gtctgaggga
+     5161 ggaggggtgg ggggcctgga ctcctgggtc tgagggagga gggtctgggc ctgtactcct
+     5221 ggatctgagg gaggaggggc tggggaactt gggctcctgg gtctgaggga ggagggagct
+     5281 ttggtctgga ctcctgggtc tgagggagta ggggctaggg atctggactc gtgggtgtga
+     5341 ggaaggaggg gctggggtcc tggactcctg ggtctgagga aggaggggca gggggcttgg
+     5401 actcctgggt ctgaggaagg aggggccggg agcctggact cctaagtctg agggaggagg
+     5461 gtctgggggc ctggactgct gggtgtgagc agaagggtct gggtgctggg agtcccgagc
+     5521 ctggggagat gatggttaaa cttctgggaa tcaagtcaaa ctcctgagtc tttgacattg
+     5581 atgtatcttg aatgggaggg tcagtctgtg gggaaggatt acccaggtgc cgaggcaaga
+     5641 gactgaaggc acaaactgtt tcagtataat aaagaaaata gttagaataa gaatagttat
+     5701 catacaaatt agatatagag atgatcatgg acagtatcaa tcattagtgt aaacattatt
+     5761 aatcattagc tattactttt attctttgtt gtataactaa tataaccagg aaacaaccgg
+     5821 tgggtatagg gtcaggtact gaagggacat tgtgagaagt gacctagaag gcaagaggtg
+     5881 agccttctgt cacaccggca taagggcctc ttgagggctc cttggtcaag cgggaacgcc
+     5941 agtgtctggg aaggcacccg ttactcagca gaccacgaaa gggaatctcc ttttcttgga
+     6001 ggagtcaggg aacactctgc tccaccagct tcttgtggga ggctgggtat tatctaggcc
+     6061 tgcccgcagt catcctgctg tgctgtgctt caatggtcac gctccttgtc ctcttgcatt
+     6121 ttcctcccgt actcctggtt cctctttgaa gttcgtagta gatagcggta gaagaaatag
+     6181 tgaaagcctt tttttttttt tttttgaggc ggagtctcgc tctgtccccc aggctggagt
+     6241 gcagtggcgt gatctcggct cactgcaatc tccgcctcct gggttcacac cattctcctg
+     6301 cctcaccctc ccaaatagct aggactacag gcgccctcca ccacgcgccc ggataatttt
+     6361 ttgtattttt agtagagaca gggtttcacc gtgttagcca ggatggcctc cacctcctga
+     6421 ccttgtgatc cgcccgcctc agcctcccaa agtgctggga ttacaggcgt gagccaccgc
+     6481 gcccgcccga aatagtgaaa gtcttaaagt ctttgatctt tcttataagt gcagagaaga
+     6541 aaacgctgac atatgctgcc ttctctttct gcttcggctg cctaaaaggg aagggccccc
+     6601 tgtcccatga tcacgtgact tgcttgacct tatcagtcat ttggacgact caccctcctt
+     6661 atcctgcccc cccttgtctt gtatacaata aatatcagcg cgcccagcca ttcggggcca
+     6721 ctaccggtct ctgcgtcttg atggtagtgg tcccccgggc ccagctgttt tctctttatc
+     6781 tctttgtctt gtgtctttat ttcttacaat ctctcctctc ctcacagggg aagaacaccc
+     6841 acccgcaaag ccccgtaggg ctggacccta cgttagcctg ccctgctcgg ggttggcgat
+     6901 gctggaggtg ggccttggac cagagaaaat gctttaatta ggtgacaagc gggcagaggc
+     6961 ctttgtctct ggcgccggca gccacggccc ccgctgacgg cgtgggaaac agaccctgtt
+     7021 ccactccggt ctccagcctt ggaatggttg ccttcgtgca gtgcaggtct ggaaagtagc
+     7081 agtttggcac gggaccctag aattccccaa aaggagtgac taggggctgg gattctggaa
+     7141 tttgagtgtg gacggtgagg cggggggtgt gggagatcgg agaccctggt gggcgcggga
+     7201 gcacctgcag gctggaggcc ctcgcgcgct ccggcggcag cctggcaaac aggttctcca
+     7261 tcccccagga ggacgcggca gagggcggac gatcgctcca ctcgccggga ccaggtgcgg
+     7321 gggccctgcc cagccgctgg ggcgtggcca ggctcgaagc acccaggtgt cgggggccga
+     7381 ctctaagccc tggcaccgga agagagaggg cggcggattg gacctcccgg ctccagcatt
+     7441 gcaactgggc gctccgtctc ctggtccacg caatgatgct gcggctgctc agaagccagg
+     7501 tagcctgccc tgggtgaagc cttcgcgcag gtcaatgacg gggcggaggg gcagggcgcg
+     7561 gtcccctgca tccccgatct ggggagcggt gggcccaggg gccatcgcct tagcccctgg
+     7621 cgctggggct cggcgccaag tgacgggcgg ggctccacct tccagccatc cgcccggccc
+     7681 gggagggcgg acgctgcgag actcccggcc gcgccctctc cttcctctcc tccccaagcc
+     7741 ctcgctgcca gtccggacag gctgcgcgga ggggagggct gccgggccgg atagccggac
+     7801 gcctggcgtt ccaggggcgg ccggatgtgg cctgcctttg cggagggtgc gctccggcca
+     7861 cgaaaagcgg actgtggatc tgccacctgc aagcagctcg ggtaagtggg gactgcccca
+     7921 ctcagttgtt cctgggaccc aggaacaact ccttcagaac caggaggtgc acccccaacc
+     7981 tcttctccag gtcttcctaa ggccctagga atctccgcca cctccccagc cattactcct
+     8041 ccaggaacca agatgctcct tccgctcctg accctccagc ctctcttgtt ttacttgaac
+     8101 tatcgtttcc catcaccacc tctgtggtgg attttgcgcc tcacagacag gtactcctga
+     8161 gaaacaggct ggtggaagag tccagtatca gcggaactta caggagggga gactcgagat
+     8221 tccttcagga aaggtgtagg aacctggacc actttctttt tttttttttt tttttttttt
+     8281 taagacaggg tccctctctg tcgcgcaagc tggagtgcag tcagcggtgc tatcgcggct
+     8341 cattgtgagc tccggggatc ctcccgcctt agcatccggt gtagctgaga ccacagacat
+     8401 gtgccaccat gccaagctaa ttttatttat ttttttttgg agacggagtt tcactcttgt
+     8461 tgcccaggct ggagtgtaat ggcatgatct cagctcaccg caactcccgc cccccgggtt
+     8521 caggcgattc tcctgcctca gcctcccgag tggctgggat tacaggcatg cgccaccatg
+     8581 cccggctaat tttgtatttt aagtagagac agggtttctc cacgttggtc aggctggtct
+     8641 cgaactccca acctcaggtg atccacccac cttggcctcc caaagtgctg gggttacagg
+     8701 tgtgagccac cgcgcctggc ccatgccaag ctaattttaa aatttttttg taagagtgct
+     8761 ctgttgccca ggctgatctt gaactcctgg gctcaaggga tcctcccatc tcagcctccc
+     8821 aatatgctgg gattacaggt gtgagccaca gtgcccagcc aaaccatggc tatcttgaaa
+     8881 accacttgtc ttccagtccc catgccccga aattccaagg ctctcatccc tgaaacctag
+     8941 gactcaggct ctccctacct cagccccagg agtctaaacc tttaacttcc tctttccctg
+     9001 ggactaagga gtgctgcacc ccaggcgcct cccttacccc acatccctcc tcagcctccc
+     9061 ctcctcagcc tcagagcatt tgctaattcg cctttcctcc cctgcagcca tgtggctccg
+     9121 gagccatcgt cagctctgcc tggccttcct gctagtctgt gtcctctctg taatcttctt
+     9181 cctccatatc catcaagaca gctttccaca tggcctaggc ctgtcgatcc tgtgtccaga
+     9241 ccgccgcctg gtgacacccc cagtggccat cttctgcctg ccgggtactg cgatgggccc
+     9301 caacgcctcc tcttcctgtc cccagcaccc tgcttccctc tccggcacct ggactgtcta
+     9361 ccccaatggc cggtttggta atcagatggg acagtatgcc acgctgctgg ctctggccca
+     9421 gctcaacggc cgccgggcct ttatcctgcc tgccatgcat gccgccctgg ccccggtatt
+     9481 ccgcatcacc ctgcccgtgc tggccccaga agtggacagc cgcacgccgt ggcgggagct
+     9541 gcagcttcac gactggatgt cggaggagta cgcggacttg agagatcctt tcctgaagct
+     9601 ctctggcttc ccctgctctt ggactttctt ccaccatctc cgggaacaga tccgcagaga
+     9661 gttcaccctg cacgaccacc ttcgggaaga ggcgcagagt gtgctgggtc agctccgcct
+     9721 gggccgcaca ggggaccgcc cgcgcacctt tgtcggcgtc cacgtgcgcc gtggggacta
+     9781 tctgcaggtt atgcctcagc gctggaaggg tgtggtgggc gacagcgcct acctccggca
+     9841 ggccatggac tggttccggg cacggcacga agcccccgtt ttcgtggtca ccagcaacgg
+     9901 catggagtgg tgtaaagaaa acatcgacac ctcccagggc gatgtgacgt ttgctggcga
+     9961 tggacaggag gctacaccgt ggaaagactt tgccctgctc acacagtgca accacaccat
+    10021 tatgaccatt ggcaccttcg gcttctgggc tgcctacctg gctggcggag acactgtcta
+    10081 cctggccaac ttcaccctgc cagactctga gttcctgaag atctttaagc cggaggcggc
+    10141 cttcctgccc gagtgggtgg gcattaatgc agacttgtct ccactctgga cattggctaa
+    10201 gccttgagag ccagggagac tttctgaagt agcctgatct ttctagagcc agcagtacgt
+    10261 ggcttcagag gcctggcatc ttctggagaa gcttgtggtg ttcctgaagc aaatgggtgc
+    10321 ccgtatccag agtgattcta gttgggagag ttggagagaa gggggacgtt tctggaactg
+    10381 tctgaatatt ctagaactag caaaacatct tttcctgatg gctggcaggc agttctagaa
+    10441 gccacagtgc ccacctgctc ttcccagccc atatctacag tacttccaga tggctgcccc
+    10501 caggaatggg gaactctccc tctggtctac tctagaagag gggttacttc tcccctgggt
+    10561 cctccaaaga ctgaaggagc atatgattgc tccagagcaa gcattcacca agtccccttc
+    10621 tgtgtttctg gagtgattct agagggagac ttgttctaga gaggaccagg tttgatgcct
+    10681 gtgaagaacc ctgcagggcc cttatggaca ggatggggtt ctggaaatcc agataactaa
+    10741 ggtgaagaat ctttttagtt tttttttttt ttttttggag acagggtctc gctctgttgc
+    10801 ccaggctgga gtgcagtggc gtgatcttgg ctcactgcaa cttccgcctc ctgtgttcaa
+    10861 gcgattctcc tgtctcagcc tcctgagtag atgggactac aggcacaggc cattatgcct
+    10921 ggctaatttt tgtattttta gtagagacag ggtttcacca tgttggccag gatggtctcg
+    10981 atctcctgac cttgtcatcc acctgtcttg gcctcccaaa gtgctgggat tactggcatg
+    11041 agccactgtg cccagcccgg atattttttt tttaattatt tatttattta tttatttatt
+    11101 gagacggagt cttgctctgt agcccaggcc agagtgcagt ggcgcgatct cagctcactg
+    11161 caagctctgc ctcccgggtt catgccattc tgcctcagcc tcctgagtag ctgggactac
+    11221 aggcgcccgc caccacgccc ggctaatttt ttttgtattt ttagtagaga cggggtttca
+    11281 tcgtgttaac caggatggtc tcgatctcct gacctcgtga tctgcccacc tcggcctccc
+    11341 acagtgctgg gattaccggc gtgagccacc atgcctggcc cggataattt tttttaattt
+    11401 ttgtagagac gaggtcttgt gatattgccc aggctgttct tcaactcctg ggctcaagca
+    11461 gtcctcccac cttggcctcc cagaatgctg ggtttataga tgtgagccag cacaccgggc
+    11521 caagtgaaga atctaatgaa tgtgcaacct aattgtagca tctaatgaat gttccaccat
+    11581 tgctggaaaa attgagatgg aaaacaaacc atctctagtt ggccagcgtc ttgctctgtt
+    11641 cacagtctct ggaaaagctg gggtagttgg tgagcagagc gggactctgt ccaacaagcc
+    11701 ccacagcccc tcaaagactt ttttttgttt gttttgagca gacaggctaa aatgtgaacg
+    11761 tggggtgagg gatcactgcc aaaatggtac agcttctgga gcagaacttt ccagggatcc
+    11821 agggacactt ttttttaaag ctcataaact gccaagagct ccatatattg ggtgtgagtt
+    11881 caggttgcct ctcacaatga aggaagttgg tctttgtctg caggtgggct gctgagggtc
+    11941 tgggatctgt tttctggaag tgtgcaggta taaacacacc ctctgtgctt gtgacaaact
+    12001 ggcaggtacc gtgctcattg ctaaccactg tctgtccctg aactcccaga accactacat
+    12061 ctggctttgg gcaggtctga gataaaacga tctaaaggta ggcagaccct ggacccagcc
+    12121 tcagatccag gcaggagcac gaggtctggc caaggtggac ggggttgtcg agatctcagg
+    12181 agccccttgc tgttttttgg agggtgaaag aagaaacctt aaacatagtc agctctgatc
+    12241 acatcccctg tctactcatc cagaccccat gcctgtaggc ttatcaggga gttacagtta
+    12301 caattgttac agtactgttc ccaactcagc tgccacgggt gagagagcag gaggtatgaa
+    12361 ttaaaagtct acagcactaa cccgtgtctc tgtagctttt ttggagccag agccactgtg
+    12421 tatgtgtgtg tgggtttgtg tgtgtgtgtg tgtgtgtgtg tgtgtaagag agtggaggaa
+    12481 aaggtggggt acttctgaag acttttattt ttttttaatt aatttatttt ttttcagaga
+    12541 tcgagtcttg ctctgtggcc caggctggag tgcagtagtg tgatctcggc ccactgcaaa
+    12601 ctcccacctc tcggattctg gtgcctcagc ctcccaagta gctgggacta cagacgttcg
+    12661 ccaccatgcc cagctaattt ttgtattttt agtagagacg gggtttcacc atgttagcca
+    12721 ggctggcctc gaactcctga cctcagacaa tctgcccgcc tcggcctccc aaagcgctgg
+    12781 aattacaagc gtgagccacc gcgccgggcc ctgaggattt ttattactcg tgattgggag
+    12841 tactgtccct acttagatct gacagcccct tgttgctgga cttgtgtgag ttgtggtccc
+    12901 tgtttttctg gttccctgtt tctatcacac aggagagaga gaccttccag gaccctaacg
+    12961 tctgagcccc cagttgctca ctcctggact gtcagtattg gcccccagtc ctctcctccc
+    13021 actgggacct ccgcgtgggc agaagaggcg gaggagggag cggattatca ctgaactaca
+    13081 tttcccggaa agctatgagg ttggcagcgt cagtcagcta cagagaaaga ggccccaggg
+    13141 cattttggga gttgtagtct tagggctaaa atgtccactt cgtggctcga cagccgtttc
+    13201 caaggaccgc ggtgggggcg gcagcggcct ggggggccgg atctagccca aagcctgggt
+    13261 cctggggcaa ggggagggga ggaaactgaa ggcctgagtc cggtccttga ctctggaagc
+    13321 cagagtagtc aggaggcttc ctcttcccta gatgctggga aaattctagt ccaaaaaggc
+    13381 tgcagcctct gtgacgtcat ggagcgatgg gcgggacctc cctttgttgc agtccaatca
+    13441 gacagagttg agtttctggg tggggccgag gaaaacccca aggaatatct ataaaggaat
+    13501 tcgggcccct acgtgagaag ctcggagggg gtggtttcag gagttccttg tggagagggg
+    13561 atcgtccgtg actcagaccc cgtcgaaaag ctctcgattt cacgcaacca accttaccct
+    13621 cgtccccaac acaatccttg attttacccc tgggaaaatt agcgtaggtg gtcatgaccc
+    13681 cggcttcctc tttaaaagcc ctcagaacct ggaccgggct cctcaatgaa ccctagtgtt
+    13741 agaggccaca aatcgggaac caaggtcggg gagcggctgt ttagggtgca tcactgttca
+    13801 ggatgcatcg gggctccttt ttctaagcgg aagggtgcgc cctgcaaatt gggagcccgt
+    13861 tagttttggg gaagggtgaa caagggcccc ctaggtctag aggaccgcat ggagtctcgc
+    13921 ttaagtgtta gtggggtcct cagttctagg aatctggtat gtgttttggt tttgaaggag
+    13981 ttccgagttt gataatatcg tggttgggtc tgtgttagat gtttattggt ttgggcattg
+    14041 aatcttcagc ttgaggttca acaggttttg gggggctggc gggggagtgc ctcggtgttg
+    14101 ctcttaaggg ttggagttca ggctcacgtc aatctgggga cttggaaaat tccacagttt
+    14161 gggattttgg gaaggggcgc atggggttgg gagattccag gttctgagtt tggggactta
+    14221 tgagtgattc ctgtttaata gtttttctga tctctcagtt gggggattca gtgagaaccc
+    14281 taaattttgg gtcccctgga ttggggctca gtttcacact tcggaggcat ttgatgaagg
+    14341 acataggtcc tctttatttg gagatttcct gaagatcctc
+//
+
