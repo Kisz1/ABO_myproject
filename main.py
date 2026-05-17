@@ -1630,7 +1630,14 @@ if analyze_button:
             if fasta_files and not fwd_ab1:
                 st.info("FASTA results are in the **Exon-based SNP** and **Allele Prediction** tabs.")
             if processed_AB1:
-                hetero_sites_plot = [(h['position'], h) for h in hets] if hets else None
+                def _het_to_intensities(h):
+                    tb = h.get('top_bases')
+                    if tb:
+                        return dict(tb)
+                    if 'major_signal' in h and 'minor_signal' in h:
+                        return {h['ref_base']: h['major_signal'], h['alt_base']: h['minor_signal']}
+                    return {h['ref_base']: 1, h['alt_base']: 1}
+                hetero_sites_plot = [(h['position'], _het_to_intensities(h)) for h in hets] if hets else None
                 for i in processed_AB1:  # type: ignore
                     exon_num = i.get('exon')
                     cds_start, cds_end = get_cds(exon_num) if exon_num is not None else (None, None)

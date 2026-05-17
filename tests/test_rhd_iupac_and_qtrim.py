@@ -203,6 +203,164 @@ def test_heterozygous_iupac_flows_through_analyze():
             assert result.get('zygosity') == 'het'
 
 
+# --------------------------------------------------------------------------- #
+# Phred Q-score gate at SNP column (Q30, lab standard)                        #
+# --------------------------------------------------------------------------- #
+
+def test_phred_gate_blocks_snp_when_base_below_q30():
+    """A SNP at the c.1227 position with the alt base 'A' but Phred Q15 must
+    be silently suppressed — the analyzer does not include it in detected_snps
+    because the base call is not reliable enough to act on clinically.
+    """
+    analyzer = RHDAnalyzer()
+    ref, query = _make_ref_and_query(1227, 'G', 'A')
+    # Build a quality list: all Q40 except c.1227 which is Q15.
+    quality = [40] * len(query)
+    quality[1227 - 1] = 15
+
+    detected = analyzer._detect_diagnostic_snps(query, ref, query_quality=quality)
+    # Below-Q30 Phred at the SNP position -> SNP not detected.
+    assert 'c.1227G>A' not in detected, (
+        f"Expected Q15 at c.1227 to suppress the SNP, got {detected}"
+    )
+
+
+def test_phred_gate_passes_snp_when_base_at_q30_or_above():
+    """Q30 at the SNP column should pass the gate and detect the SNP normally,
+    with the Phred score attached to the entry for audit."""
+    analyzer = RHDAnalyzer()
+    ref, query = _make_ref_and_query(1227, 'G', 'A')
+    quality = [40] * len(query)
+    quality[1227 - 1] = 30  # exactly at threshold
+
+    detected = analyzer._detect_diagnostic_snps(query, ref, query_quality=quality)
+    assert 'c.1227G>A' in detected
+    assert detected['c.1227G>A']['zygosity'] == 'hom'
+    assert detected['c.1227G>A']['phred_at_snp'] == 30
+
+
+def test_no_quality_supplied_skips_phred_gate_backward_compat():
+    """Legacy 2-arg call (no quality) must still detect the SNP — FASTA
+    inputs have no Phred and shouldn't be penalised."""
+    analyzer = RHDAnalyzer()
+    ref, query = _make_ref_and_query(1227, 'G', 'A')
+    detected = analyzer._detect_diagnostic_snps(query, ref)  # no quality
+    assert 'c.1227G>A' in detected
+    assert 'phred_at_snp' not in detected['c.1227G>A']
+
+
+def test_analyze_multi_amplicon_accepts_3_tuples_with_quality():
+    """The amplicon-voting entry point must accept 3-tuples (name, seq, qual)
+    in addition to legacy 2-tuples without crashing — verifies the input
+    contract change. The actual gate behaviour is tested at the
+    _detect_diagnostic_snps level (the unit tests above), which is the
+    correct layer to assert on since `analyze_multi_amplicon` requires real
+    RHD-aligned reads to produce non-trivial diagnostic_snps output.
+    """
+    analyzer = RHDAnalyzer()
+    _, query = _make_ref_and_query(1227, 'G', 'A', length=1500)
+    quality = [40] * len(query)
+    quality[1227 - 1] = 10  # low Phred at SNP
+
+    # Both 2-tuple (legacy) and 3-tuple (new) inputs must produce well-formed
+    # result dicts with the same top-level keys.
+    result_2tuple = analyzer.analyze_multiple_amplicons([("legacy", query)])
+    result_3tuple = analyzer.analyze_multiple_amplicons([("with_qual", query, quality)])
+
+    for r in (result_2tuple, result_3tuple):
+        assert set(r) >= {
+            'amplicon_results', 'votes', 'final_verdict',
+            'confidence', 'details', 'total_amplicons',
+        }
+        assert r['total_amplicons'] == 1
+
+
+def test_legacy_2tuple_still_accepted_after_phred_refactor():
+    """Sanity: a list of 2-tuples (the old FASTA-style API) must not crash
+    after the 3-tuple support was added."""
+    analyzer = RHDAnalyzer()
+    _, query = _make_ref_and_query(1227, 'G', 'A', length=1500)
+    result = analyzer.analyze_multiple_amplicons([
+        ("a", query), ("b", query),
+    ])
+    assert result['total_amplicons'] == 2
+
+
+# --------------------------------------------------------------------------- #
+# Region picking + voting quality floor + RHD456 weighting                    #
+# These guard the fix that stopped short exon 4-6 reads from being routed to  #
+# the RHD1 reference (which made identity collapse to ~60% and flip them to   #
+# RhD-, causing true RhD+ samples to be miscalled).                           #
+# --------------------------------------------------------------------------- #
+
+def test_region_picked_by_identity_not_length():
+    """A short query that matches RHD456_REFERENCE near-perfectly must be
+    routed to RHD456 even though its length (<1200 bp) would have triggered
+    the old length-based router to send it to RHD1."""
+    from utils.rhd_analyzer import RHD456_REFERENCE
+    analyzer = RHDAnalyzer()
+    # 600 bp slice from middle of RHD456 reference — clearly an exon 4-6 read.
+    short_rhd456 = RHD456_REFERENCE[500:1100]
+    result = analyzer.analyze(short_rhd456)
+    assert result['region'] == 'RHD456', (
+        f"600 bp RHD456 slice should pick RHD456, got {result['region']} "
+        f"with identity {result['identity']}"
+    )
+    assert result['identity'] >= 95.0
+
+
+def test_low_identity_amplicon_votes_inconclusive_not_rhd_minus():
+    """An amplicon whose best identity to either reference is below
+    MIN_AMPLICON_IDENTITY (noise floor) must vote Inconclusive, not RhD-.
+    Garbage reads must not pollute the vote tally with false RhD- evidence."""
+    analyzer = RHDAnalyzer()
+    # Random-ish 500 bp sequence — won't align well to either reference.
+    junk = ('ACGT' * 125)
+    result = analyzer.analyze_multiple_amplicons([('junk', junk)])
+    assert result['votes']['Inconclusive'] >= 1, (
+        f"Junk read should vote Inconclusive, got {result['votes']}"
+    )
+    assert result['votes']['RhD-'] == 0
+
+
+def test_rhd456_vote_outweighs_rhd1_when_they_disagree():
+    """A single RHD456 deletion-level read should outweigh a single RHD1
+    high-identity read in the final verdict. This encodes the biological
+    fact that RHD1 can cross-amplify RHCE (giving false RHD presence),
+    while RHD456 covers the discriminating antigenic determinants.
+    Asserted via the weighted vote tally (RHD456 weight = 2, RHD1 = 1)."""
+    from utils.rhd_analyzer import RHD1_REFERENCE, RHD456_REFERENCE, REGION_VOTE_WEIGHT
+    assert REGION_VOTE_WEIGHT['RHD456'] > REGION_VOTE_WEIGHT['RHD1'], (
+        "Regression: RHD456 must carry strictly more weight than RHD1"
+    )
+    analyzer = RHDAnalyzer()
+    # A read that perfectly matches RHD1 only — picked region RHD1, vote RhD+.
+    rhd1_hit = RHD1_REFERENCE[:800]
+    # A read that matches RHD456 at ~82% identity (75-85% range -> RhD-,
+    # well above the noise floor) by mutating every 6th base. The dominant
+    # alignment is to RHD456, not RHD1.
+    mutated = list(RHD456_REFERENCE[500:1500])
+    for i in range(0, len(mutated), 6):
+        mutated[i] = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}.get(mutated[i], 'A')
+    rhd456_deletion_signal = ''.join(mutated)
+    result = analyzer.analyze_multiple_amplicons([
+        ('rhd1_hit', rhd1_hit),
+        ('rhd456_del', rhd456_deletion_signal),
+    ])
+    # Sanity: confirm the second read was actually routed to RHD456 (so the
+    # weighting actually kicks in). If region picking misroutes, the test
+    # fails for the wrong reason — surface that here with a clearer message.
+    regions = [a['region'] for a in result['amplicon_results']]
+    assert 'RHD456' in regions, (
+        f"Test setup failure: expected one amplicon routed to RHD456, "
+        f"got regions={regions}"
+    )
+    assert result['final_verdict'].startswith('RhD-'), (
+        f"RHD456 RhD- evidence should outweigh single RHD1 RhD+ vote; "
+        f"got verdict={result['final_verdict']!r}, weighted_votes={result['votes']}"
+    )
+
+
 if __name__ == '__main__':
     import traceback
     tests = [v for k, v in dict(globals()).items() if k.startswith('test_')]

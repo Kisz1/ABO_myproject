@@ -184,6 +184,24 @@ DIAGNOSTIC_SNP_POSITIONS = {
 }
 
 
+MIN_PHRED_AT_SNP = 30   # per-base Phred Q-score required AT each diagnostic
+                        # SNP position when AB1 quality is available. Q30 =
+                        # 1-in-1000 base error rate (lab standard).
+
+# Voting quality floor: amplicons whose best alignment identity to either
+# reference is below this threshold are likely amplification failures or
+# off-target reads (noise floor ~60% comes from incidental RHD/RHCE homology).
+# They vote 'Inconclusive' instead of polluting RhD+/RhD- with garbage.
+MIN_AMPLICON_IDENTITY = 75.0
+
+# Per-region vote weights. RHD456 covers exons 4-6, which contain the major
+# D antigen determinants and the SNPs that actually discriminate RHD from
+# RHCE. RHD1 (exon 1) is highly conserved between RHD and RHCE, so a
+# high-identity hit there can reflect cross-amplification of RHCE rather
+# than RHD presence — it gets unit weight while RHD456 evidence counts double.
+REGION_VOTE_WEIGHT = {'RHD1': 1, 'RHD456': 2}
+
+
 class RHDAnalyzer:
     def __init__(self, gb_path=None, reference_seq=None):
         """
@@ -218,33 +236,18 @@ class RHDAnalyzer:
         return exons
 
     def detect_amplicon_region(self, query_length, identity_rhd1, identity_rhd456):
+        """Pick the better-fitting reference by alignment identity.
+
+        Length used to drive this decision, but Sanger trace length depends
+        on read quality, not on which genomic region was amplified — short
+        exon 4-6 reads were being misrouted to RHD1 and counted as RhD-
+        because RHD1's incidental ~60% homology to RHCE made identity collapse.
+        Picking by identity is robust: a true RHD456 amplicon will hit
+        RHD456_REFERENCE at >>RHD1_REFERENCE regardless of read length.
+
+        ``query_length`` is kept for signature compatibility but unused.
         """
-        Auto-detect which amplicon region based on sequence length and alignment identity.
-
-        WHO Standards:
-        - RHD1: ~951 bp (exon 1 region, typical range: 200-1000 bp)
-        - RHD456: ~3336 bp (exons 4-6 region, typical range: 2500-3500 bp)
-
-        Returns: 'RHD1' or 'RHD456'
-        """
-        # Primary decision: use sequence length (most reliable indicator)
-        # RHD1 amplicons are typically <1200bp
-        # RHD456 amplicons are typically >=2500bp
-        if query_length < 1200:
-            return 'RHD1'
-        elif query_length >= 2500:
-            return 'RHD456'
-
-        # Borderline region (1200-2500bp): use alignment identity
-        # This is unusual - properly designed amplicons shouldn't fall here
-        identity_diff = abs(identity_rhd1 - identity_rhd456)
-
-        if identity_diff > 5:
-            # Clear winner based on identity
-            return 'RHD1' if identity_rhd1 > identity_rhd456 else 'RHD456'
-        else:
-            # Both similar: default to RHD456 for long ambiguous sequences
-            return 'RHD456'
+        return 'RHD456' if identity_rhd456 >= identity_rhd1 else 'RHD1'
 
     def _detect_rhdpsi(self, query_seq, variants):
         """
@@ -479,9 +482,15 @@ class RHDAnalyzer:
 
         return ('Inconclusive', 'Could not determine amplicon region')
 
-    def analyze(self, query_seq):
+    def analyze(self, query_seq, query_quality=None):
         """
         Complete RHD analysis with WHO decision logic.
+
+        ``query_quality`` (optional) is a per-base Phred Q-score list aligned
+        to ``query_seq``. When provided, each diagnostic SNP call is
+        additionally gated by Q-score at the SNP position (Q30 default —
+        lab standard). FASTA inputs (no quality) skip the gate (legacy
+        behaviour).
 
         Returns dict with:
         - variants: list of detected mutations
@@ -520,8 +529,13 @@ class RHDAnalyzer:
         # Extract all variants (including insertions/deletions for RHDψ check)
         variants = self._extract_variants_simple(query_seq_str, ref_seq)
 
-        # Detect diagnostic SNPs (ISBT-defined for RhD subtyping)
-        diagnostic_snps = self._detect_diagnostic_snps(query_seq_str, ref_seq)
+        # Detect diagnostic SNPs (ISBT-defined for RhD subtyping).
+        # When AB1 Phred quality is plumbed through, each SNP is gated at
+        # Q30 — silently suppressed if the base at the SNP position is
+        # below threshold (lab-standard CAP/CLIA practice).
+        diagnostic_snps = self._detect_diagnostic_snps(
+            query_seq_str, ref_seq, query_quality=query_quality,
+        )
 
         # ISBT priority decision tree (RHDψ -> deletion -> SNPs -> identity)
         decision = self.determine_rhd_phenotype_snp_based(
@@ -607,13 +621,26 @@ class RHDAnalyzer:
 
         return (matches / aligned_positions) * 100.0
 
-    def _detect_diagnostic_snps(self, query_seq, ref_seq):
+    def _detect_diagnostic_snps(self, query_seq, ref_seq, query_quality=None):
         """
         Detect ISBT-verified diagnostic SNPs in the query sequence.
 
         IUPAC-aware: heterozygous calls encoded as ambiguity codes (e.g. 'R' for
         A/G) are detected and tagged with zygosity='het'. 'N' is treated as a
         no-call and skipped.
+
+        When ``query_quality`` (a list of per-base Phred Q-scores aligned to
+        ``query_seq``) is provided, additionally gates each SNP by Q-score
+        at the SNP position — silently suppresses the SNP if
+        Q < MIN_PHRED_AT_SNP. The Phred score that passed the gate is
+        attached to the returned SNP dict under `phred_at_snp` for audit.
+
+        Note: this analyzer indexes ``query_seq[pos - 1]`` directly, which
+        is correct when the read is aligned to the reference's coordinate
+        system (the multi-amplicon RHD pipeline ensures this by classifying
+        reads as RHD1 / RHD456 amplicons before calling). The same index
+        is used to look up Phred quality, so the gate is consistent with
+        the existing positional logic.
         """
         detected_snps = {}
         query_seq_str = str(query_seq).upper()
@@ -632,6 +659,14 @@ class RHDAnalyzer:
             if query_base == 'N' or query_base == '-':
                 continue
 
+            # Phred Q-score gate at the SNP position. Silent suppression —
+            # SNP is simply not included in detected_snps if below threshold.
+            phred_at_snp = None
+            if query_quality is not None and (pos - 1) < len(query_quality):
+                phred_at_snp = int(query_quality[pos - 1])
+                if phred_at_snp < MIN_PHRED_AT_SNP:
+                    continue
+
             decoded = IUPAC_DECODE.get(query_base, query_base)
             ref_b = snp_info['ref_base']
             alt_b = snp_info['alt_base']
@@ -643,7 +678,7 @@ class RHDAnalyzer:
             else:
                 continue
 
-            detected_snps[snp_name] = {
+            entry = {
                 'exon': snp_info['exon'],
                 'cDNA_position': pos,
                 'reference_base': ref_b,
@@ -653,6 +688,9 @@ class RHDAnalyzer:
                 'significance': snp_info['significance'],
                 'reference': snp_info['reference'],
             }
+            if phred_at_snp is not None:
+                entry['phred_at_snp'] = phred_at_snp
+            detected_snps[snp_name] = entry
 
         return detected_snps
 
@@ -760,7 +798,11 @@ class RHDAnalyzer:
         Analyze multiple RHD amplicon sequences and vote on RhD+/RhD- status.
 
         Args:
-            sequences_with_names: list of (name, sequence) tuples
+            sequences_with_names: list of (name, sequence) tuples (legacy)
+                or (name, sequence, quality) triples where quality is a
+                per-base Phred Q-score list (from process_rhd_ab1_files). When
+                quality is provided, each diagnostic SNP is additionally
+                gated at Q30 at the SNP position (lab standard).
 
         Returns:
             {
@@ -781,11 +823,18 @@ class RHDAnalyzer:
             }
 
         amplicon_results = []
-        votes = {'RhD+': 0, 'RhD-': 0, 'Inconclusive': 0}
+        votes = {'RhD+': 0, 'RhD-': 0, 'Inconclusive': 0}        # weighted
+        raw_votes = {'RhD+': 0, 'RhD-': 0, 'Inconclusive': 0}    # per-amplicon
 
-        # Analyze each amplicon
-        for name, seq in sequences_with_names:
-            result = self.analyze(seq)
+        # Analyze each amplicon. Accept both 2-tuples and 3-tuples for
+        # backward compat with FASTA inputs (which carry no Phred quality).
+        for entry in sequences_with_names:
+            if len(entry) == 3:
+                name, seq, qual = entry
+            else:
+                name, seq = entry
+                qual = None
+            result = self.analyze(seq, query_quality=qual)
 
             # Vote follows the priority decision tree result, NOT just identity.
             # An RHDψ sample has high identity but is RhD-; voting must reflect that.
@@ -795,7 +844,12 @@ class RHDAnalyzer:
             region = result['region']
             phenotype = result.get('rhd_status', '')
 
-            if phenotype.startswith('RhD-'):
+            if identity < MIN_AMPLICON_IDENTITY:
+                # Best-fit identity below the noise floor — amplification
+                # failure / off-target read. Vote Inconclusive so it doesn't
+                # pollute RhD+/RhD- with garbage.
+                vote = 'Inconclusive'
+            elif phenotype.startswith('RhD-'):
                 vote = 'RhD-'
             elif phenotype.startswith('RhD+'):
                 vote = 'RhD+'
@@ -819,11 +873,14 @@ class RHDAnalyzer:
                 'diagnostic_snps': result.get('diagnostic_snps', {}),
             })
 
-            votes[vote] += 1
+            # RHD456 votes count double — exon 4-6 is the diagnostic region;
+            # RHD1 can cross-amplify RHCE so its hits are weaker evidence.
+            votes[vote] += REGION_VOTE_WEIGHT.get(region, 1)
+            raw_votes[vote] += 1
 
         # Calculate final verdict
         total = len(amplicon_results)
-        verdict, confidence, details = self._calculate_final_verdict(votes, total)
+        verdict, confidence, details = self._calculate_final_verdict(votes, total, raw_votes)
 
         return {
             'amplicon_results': amplicon_results,
@@ -873,12 +930,25 @@ class RHDAnalyzer:
         # Default to Inconclusive if unclear
         return 'Inconclusive'
 
-    def _calculate_final_verdict(self, votes, total):
-        """Calculate final verdict based on voting results."""
+    def _calculate_final_verdict(self, votes, total, raw_votes=None):
+        """Calculate final verdict from weighted votes plus raw per-amplicon counts.
+
+        ``votes`` is the region-weighted tally (RHD456 counts double); the
+        majority decision uses these so that exon-4-6 evidence properly
+        dominates exon-1 cross-amplification artefacts. ``raw_votes`` is the
+        unit-per-amplicon tally used for the "all amplicons agree" check and
+        the human-readable details message. Falls back to ``votes`` if
+        ``raw_votes`` is omitted (legacy callers).
+        """
 
         rhd_plus = votes.get('RhD+', 0)
         rhd_minus = votes.get('RhD-', 0)
         inconclusive = votes.get('Inconclusive', 0)
+
+        rv = raw_votes if raw_votes is not None else votes
+        raw_plus = rv.get('RhD+', 0)
+        raw_minus = rv.get('RhD-', 0)
+        raw_incl = rv.get('Inconclusive', 0)
 
         # Determine confidence based on number of amplicons
         if total == 1:
@@ -888,25 +958,25 @@ class RHDAnalyzer:
         else:
             confidence = 'High'
 
-        # All votes same
-        if rhd_plus == total and rhd_plus > 0:
+        # All amplicons agree (uses raw per-amplicon counts, not weighted)
+        if raw_plus == total and raw_plus > 0:
             return f'RhD+ (confirmed)', confidence, f'All {total} amplicon(s) show RhD+'
 
-        if rhd_minus == total and rhd_minus > 0:
+        if raw_minus == total and raw_minus > 0:
             return f'RhD- (confirmed)', confidence, f'All {total} amplicon(s) show RhD-'
 
-        # Majority vote
+        # Majority vote (weighted: RHD456 evidence dominates RHD1 cross-amp)
         if rhd_plus > rhd_minus:
-            percent = round(100 * rhd_plus / total)
-            return f'RhD+ (probable)', confidence, f'{rhd_plus}/{total} amplicons ({percent}%) support RhD+'
+            percent = round(100 * raw_plus / total) if total else 0
+            return f'RhD+ (probable)', confidence, f'{raw_plus}/{total} amplicons ({percent}%) support RhD+'
 
         if rhd_minus > rhd_plus:
-            percent = round(100 * rhd_minus / total)
-            return f'RhD- (probable)', confidence, f'{rhd_minus}/{total} amplicons ({percent}%) support RhD-'
+            percent = round(100 * raw_minus / total) if total else 0
+            return f'RhD- (probable)', confidence, f'{raw_minus}/{total} amplicons ({percent}%) support RhD-'
 
-        # Mixed results
+        # Mixed (weighted tie) — usually one RHD1 RhD+ vs one RHD456 RhD-
         if total >= 2 and rhd_plus > 0 and rhd_minus > 0:
-            return 'Inconclusive - mixed results', 'Low', f'Need more amplicons: {rhd_plus} RhD+, {rhd_minus} RhD-, {inconclusive} inconclusive'
+            return 'Inconclusive - mixed results', 'Low', f'Need more amplicons: {raw_plus} RhD+, {raw_minus} RhD-, {raw_incl} inconclusive'
 
         return 'Inconclusive - insufficient data', confidence, 'Upload more amplicons for reliable determination'
 
