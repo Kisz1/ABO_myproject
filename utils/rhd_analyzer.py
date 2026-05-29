@@ -5,47 +5,169 @@ Note: This is a simplified implementation based on published ISBT standards.
 For complete allele classification, consult blooddatabase.isbtweb.org
 """
 
+from pathlib import Path
+
 from Bio import SeqIO
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
-# WHO STANDARD RHD REFERENCE SEQUENCES
-# RHD1: Exon 1 region (951 bp) - used to detect RHD gene presence
+# Default RefSeqGene file (NG_007494.1 / LRG_796), 64956 bp. Loaded lazily
+# in RHDAnalyzer.__init__ so self.reference_seq + self.exon_map populate
+# without the caller passing gb_path. Powers sequence-content routing in
+# utils/bloodgroup/router.py (which checks getattr(analyzer, 'reference_seq')).
+_DEFAULT_GB_PATH = Path(__file__).resolve().parent / "data" / "rhd_referance.gb"
+
+# RHD REFERENCE SEQUENCES (derived from NG_007494.1 / LRG_796)
+#
+# Both slices are verified subsequences of NG_007494.1. The previous
+# embedded blobs were hand-curated and only the RHD1 chunk matched the
+# RefSeqGene cleanly; 58% of the old RHD456 chunk's 30-mer windows did
+# not appear anywhere in NG_007494.1, which made identity scoring against
+# it unreliable.
+#
+# RHD1: NG_007494.1 positions 4341..5291 (951 bp). Spans exon 1
+# (5020..5206) with ~680 bp of 5' flank and ~85 bp of 3' flank — sized to
+# match the original RHD1 amplicon footprint.
 RHD1_REFERENCE = (
-    "ACTTCACCCTAAGGCTGGATCAGGATCCCCTCCAGGTTTTTACTAGAGCCAAACCCACATCTCCTTTCTCTTCTGCCACC"
-    "CCCCCTTAAAATGCTTAGAAACACATAGATTTAAATACAAGTTCAAATGTAAGTAATTTCAACTGTGTAACTATGAGGAG"
-    "TCAATTCTACGTGGGTCCTATCTGTATCCTCCCCAGGGCTCAGCTCCATTCTTTGCTTTCATTCATTCTCATTCAATACA"
-    "TTGTTGTTAAGAGCTCACTGGGTGCCCTCTCTGTCATGTAGTAAGGTTTTAAAAAGAAAGCCTCTTCTGAGCTTCAGTTT"
-    "CCTTATTTATAAAATAGGAATATTGATCTGTTCCTTGCTTTTCTTACAAGGATATGCTGAAGATGACTGAAGTACAGAGT"
-    "AAAGAAGGATTATGTTTGGGTATCAAAGGAATAGAATGCCCTCTTTCAAACTGAGCACAGCAGGAACCTGTAACAGGAAC"
-    "ACAGCAACTTGTTGAATGAATGACAATATTGGAAAACATACATTTCCTCCCCTCCCCATCATAGTCCCTCTGCTTCCGTG"
-    "TTAACTCCATAGACAGGCCAGCACAGCCAGCCTTGAAGCCTGAGATAAGGCCTTTGGCGGGTGTCTCCCCTATCGCTCCC"
-    "TCAAGCCCTCAAGTAGGTGTTGGAGAGAGGGGTGATGCCTGGTGCTGGTGGAACCCCTGCACAGAGACGGACACAGGATG"
-    "AGCTCTAAGTACCCGCGGTCTGTCCGGCGCTGCCTGCCCCTCTGGGCCCTAACACTGGAAGCAGCTCTCATTCTCCTCTT"
-    "CTATTTTTTTACCCACTATGACGCTTCCTTAGAGGATCAAAAGGGGCTCGTGGCATCCTATCAAGGTGAGAGTTCATTGG"
-    "AACAGTGGTCACAGGAGCAAATAGCAGGGGCAGGGGCGGGGGAGGCCTATGGTTCTCCAGGGGCACAGATG"
+    "AACTTCACCCTAAGGCTGGATCAGGATCCCCTCCAGGTTTTTACTAGAGCCAAACCCACATCTCCTTTCTCTTCTGCCAC"
+    "CCCCCCTTAAAATGCTTAGAAACACATAGATTTAAATACAAATTCAAATGTAAGTAATTTCAACTGTGTAACTATGAGGA"
+    "GTCAGTTCTACGTGGGTCCTATCTGTATCCTCCCCAGGGCTCAGCTCCATTCTTTGCTTTCATTCATTCTCATTCAATAC"
+    "ATTGTTGTTAAGAGCTCACTGGGTGCCCTCTCTGTCATGTAGTAAGGTTTTAAAAAGAAAGCCTCTTCTGAGCTTCAGTT"
+    "TCCTTATTCATAAAATAGGAGTATTGATCCATTCCTTGCTTTTCTTACAAGGATATGCTGAAGATGACTGAAGTACAGAG"
+    "TAAAGAAGGATTATGTTTGGGTGTCAAAGGAATAGAATGCCCTCTTTCAAACTGAGCACAGCAGGAACCTGTAACAGGAA"
+    "CACAGCAACTTGTTGAATGAATGACAATATTGGAAAACATACATTTCCTCCCCTCCCCATCATAGTCCCTCTGCTTCCGT"
+    "GTTAACTCCATAGAGAGGCCAGCACAACCAGCCTTGCAGCCTGAGATAAGGCCTTTGGCGGGTGTCTCCCCTATCGCTCC"
+    "CTCAAGCCCTCAAGTAGGTGTTGGAGAGAGGGGTGATGCCTGGTGCTGGTGGAACCCCTGCACAGAGACGGACACAGGAT"
+    "GAGCTCTAAGTACCCGCGGTCTGTCCGGCGCTGCCTGCCCCTCTGGGCCCTAACACTGGAAGCAGCTCTCATTCTCCTCT"
+    "TCTATTTTTTTACCCACTATGACGCTTCCTTAGAGGATCAAAAGGGGCTCGTGGCATCCTATCAAGGTGAGAGTTCATTG"
+    "GAAAAGTGGTCACAGGAGCAAATAGCAGGGGCAGGGGCGGGGGAGGCCTGTGGTTCTCCAGGGGCACAGAT"
 )
 
-# RHD456: Exons 4-6 region (~3336 bp) - used to assess D antigen variants
+# RHD456: NG_007494.1 positions 33058..36370 (3314 bp). Spans exon 4
+# (33457..33604), intron 4, exon 5 (34031..34197), intron 5, exon 6
+# (35833..35970) with ~400 bp 5' flank (intron 3 tail) and ~400 bp 3'
+# flank (intron 6 head). Introns are retained because Sanger amplicons
+# are PCR'd from genomic DNA and contain them.
 RHD456_REFERENCE = (
-    "AGGCGTTGAAGCCAATAAGAGAATGCACCAACACCTGCCTAATGCAGCTGTGCACTGCACAGTGGCCCATCAGGTCCCAG"
-    "CGTCCTGCTGGCCTTCAGCCAAAGCAGAGAGCATTAGTTGTCTAGTTTCTTACCGGCAGGCACTTGGCTCCCCCGATGGA"
-    "GATCAGCCCAGCCACAAGACCCAGCACCATGGCAAGCCACGGAGAAGGGATCAGGTGACACGAGGTACCCACAGCCACGC"
-    "CTCCTGCCAACACCGCACTGTGCACATAAGTCTGCAAAGAAATAGCGTGTGGGTAAAGGAAGCAAGGTAGAGAGAGAACA"
-    "CCATCTTGCTGCAAGTGACCAGCACGCTGGGAACAAGGCAACCCTGTAACATCCTCCCTGCTTTGCTGATCCTGAAACCA"
-    "CCTCTCCCCTGTGTTGGGCTACGTGTCCTTCATCAGTGGACACGGTGGGCCAGCTCACTACTGCCTCTTAGGCTCAGGGC"
-    "ACAGTTACCCTGATTGTGCAGCATTTAGGGAATGAGCTGGGAAGTCCAGGTGCTCAGCATCCTAGGCACCAATCACACTC"
-    "ATTAGTGGTGTGTCCCTGGACAGCGGGAAGAATGGGTTTTTGTTTTATTTTTTAGAGACAGGGTCTTGCTATGTTGCCTG"
-    "GCTGGTCTCAAACTCCTGGGCTCAAGCGATCCTCCCGCCTCAGCCTCCCGAGTGCTGGGATTACAGGCGTGAGCCACCGC"
-    "GCCCGGCCCCATGTGTGAGACGATCTGGCTTACATCTGGTCCATGTTCTCCAGTCTAAGCCAAAGCACTCATTGAGGTGT"
-    "CTGATGTGGTCATTAGGAGACAGGTCACAGCTAACAGTGAGGACTGTGGTGGAGCAGGTGCTGAGACAGGAGCTATGTAT"
-    "TCTGCCCTCACTGTCTCACTGCACCCATCACGGAAACAGGACACTTCCAGGCCTGAGCCCATTCATGAAGACACTGCTTC"
-    "ATCCCATTCCTGAGCATCATGGCCAGCATTCTAGCCCGTACCGGATGCAGCTGGTGGTGGTGGTTATGGTGATGACACCA"
-    "CAGACGGACACAGGATGAGCTCTAAGTACCCGCGGTCTGTCCGGCGCTGCCTGCCCCTCTGGGCCCTAACACTGGAAGCA"
-    "GCTCTCATTCTCCTCTTCTATTTTTTTACCCACTATGACGCTTCCTTAGAGGATCAAAAGGGGCTCGTGGCATCCTATCAA"
-    "GGTGAGAGTTCATTGGAACAGTGGTCACAGGAGCAAATAGCAGGGGCAGGGGCGGGGGAGGCCTATGGTTCTCCAGGGGC"
-    "ACAGATGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTCTGTGTGTGTGTGTGTGTGTGTGTGTGTGTG"
+    "ATGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGTGGATCGCCTGAGGTCAGGAGTTTGAGACCAGCCTGGCAAAC"
+    "ACGGTGAAACCCCATCTCTACTAAAAATACAAAATTAGCCCAGCGTAGTGGCGCATGCCTGTAATCCCAGCTACTAGGGA"
+    "AGCTGAGGCAGGAGAATCGCGTGAACCTGGGAGGCAAATGTTCCAGTGAGCCGAGATCGTGCCATTGCACTCCAGCCTGG"
+    "GCAGAGCCTGCTGGGTTGGGCTGGGTAAGCTCTGAACACCAGTCTCATGGCTTCAAGTCACACCTCCTAAGTGAAGCTCT"
+    "GAACTTTCTCCAAGGACTATCAGGGCTTGCCCCGGGCAGAGGATGCCGACACTCACTGCTCTTACTGGGTTTTATTGCAG"
+    "ACAGACTACCACATGAACATGATGCACATCTACGTGTTCGCAGCCTATTTTGGGCTGTCTGTGGCCTGGTGCCTGCCAAA"
+    "GCCTCTACCCGAGGGAACGGAGGATAAAGATCAGACAGCAACGATACCCAGTTTGTCTGCCATGCTGGGTAAGGACAAGG"
+    "TGGGGTGAGTGGTCTCCTACTTGGGCTGAGCAGAATGGCTCAGAAAAGGCTCTGGCTGAAAAAATCTCCCTCCTTTACCA"
+    "AGTTCCCCTGGGTGTCTGAAGCCCTTCCATCATGATTCATTTCTTTGAGTAGTGTTTGCTAAATTCATACCTTTGAATTA"
+    "AGCACTTCACAGAGCAGGTTCAGGAGGCCTGGGGTATGCAGATTTCAACCCTCTTGGCCTTTGTTTCCTTGTCTGTAAAA"
+    "TGTGGTTAGCTGGTATCAGCTTGAGAGCTCGGAGGGGAGACGTGACTTCCCCATCTAACTCTAAGTGACAAGGCTGAGAC"
+    "TCTCCAGCCCTAGGATTCTCATCCAAAACCCCTCGAGGCTCAGACCTTTGGAGCAGGAGTGTGATTCTGGCCAACCACCC"
+    "TCTCTGGCCCCCAGGCGCCCTCTTCTTGTGGATGTTCTGGCCAAGTTTCAACTCTGCTCTGCTGAGAAGTCCAATCGAAA"
+    "GGAAGAATGCCGTGTTCAACACCTACTATGCTGTAGCAGTCAGCGTGGTGACAGCCATCTCAGGGTCATCCTTGGCTCAC"
+    "CCCCAAGGGAAGATCAGCAAGGTGAGCAGGGCGCTGCCCTTGGGCAGCACTTGGGTCTAACAGGACTAGCACACATATTT"
+    "ATGCCCCTCCCCACCCCAGGGCCAGCGTGGGTTGGGAGAGGGCATGCCGGGTGGTGGAGCTGTGCCTGCCTCTACAGTGG"
+    "AGCTCTAGGTAGAATGCTGGGTGGTCACAGTGGGCCTGGGACTCAGGAGACTGTCCAGTGATCAAAGGCTTTCTGGGGGT"
+    "AGTGATTAAATCCATCCATGCTAACATGAAACAGACCTCAGTTTGAACCCCATTTCTGCTAGTTGCTAAAGTCAGTCACC"
+    "ATGAGCGAGAGTCAGCAGCAACAGACTAGACTAGAATTAGCCAGCCTCTCTCTTCCCCCCAACAAATTTCAAGAATGGAA"
+    "CCATCAGAATCAGAAGTAGAGAAGTATGTGACACTAGCCATGTGGCTCTGGTCAAGCCACTTCAACGTTTTGAGTCTCAG"
+    "TGGCCTCATCTGTAAAGTGGGAATTAAGAGATGGTGCATGTAAAGTGCTTAACGGGGAGTAAATGGTAGGCAAACATTAG"
+    "CTGCTGCTATTAGTAAAGAGAGACGATGGTGTGTGTGAGTCTTGTGGGCAGAGATGGGTGAGAGGGGAGACAAAACAAGT"
+    "TCTCATGATGATGGGGGAAGGGGCTCCAGCTGGTGGTGTCGGAGGGAAGTCTGGACAGACCAGTGGTGGGGCTCGGGTGG"
+    "GAGGCACTGGGGGGGCTGGAGTGGAAAGAATGTGGCCACAGATGACAGCTTCACAGCAGAATTCAGTGCTAAGAGGAAGT"
+    "GAGTGGCCATGAGTTCCATGGTGACAGAAAGTCTAAGACACCCAGCAAGGCAGGAGTGGGTGTCAACTCAGGGAAGCCCA"
+    "GAGGCTAATCCTAGGTGAGAGCTGAGGGTGTCAGATAAGAGCAAGGCAAGGCTCCGGTTCTGGAGCAGTGAAGGACATAG"
+    "CAGAGCTATGACCCAGGAACAAGGCCCAGCTTATTGAAACTGGGCCCAGTCACACAGGGTGGCACAGGCACCAAGTAGCC"
+    "AATAATAATAATAAAAACAATAACAATGATTTGTGTCTACTGGGCATTTATTCATGTTCTATGCCAGACACTGGGCTAAG"
+    "AGCTTTATATGTGGAAACTCATTTAATCCTTACAATAACCTTATGAAGAAGGTACATCCAAAACCCCATTCTTCTAGGCC"
+    "AGGTGCAGTGGCTCACACCTGTAATCCCAATATTTTGGGAGGCTGAGGCAAGAGGATTGGTTGAGGCCAGGAGTTCAAGA"
+    "CCAGCCCAGGCAACATAGCAAGACCCTGTCTCTAAAAAATAAAACAAAAACCCATTCTTCCCGCTGCCCAGGGACACACC"
+    "ACTAATGAGTGTGATGGGTGCCTAGGATGCTGAGCACCTGGACTTCCCAGCTCATTCCCTAAATGCTGCACAATCAGGGT"
+    "AACTGTGCCCTGAGCCTAAGAGGCAGTAGTGAGCTGGCCCATCATGTCCACTGATGAAGGACACGTAGCCCCAACACAGG"
+    "GGAGAAGTGGTTTCAGGATCAGCAAAGCAGGGAGGATGTTACAGGGTTGCCTTGTTCCCAGCGTGCTGGTCACTTGCAGC"
+    "AAGATGGTGTTCTCTCTCTACCTTGCTTCCTTTACCCACACGCTATTTCTTTGCAGACTTATGTGCACAGTGCGGTGTTG"
+    "GCAGGAGGCGTGGCTGTGGGTACCTCGTGTCACCTGATCCCTTCTCCGTGGCTTGCCATGGTGCTGGGTCTTGTGGCTGG"
+    "GCTGATCTCCGTCGGGGGAGCCAAGTACCTGCCGGTAAGAAACTAGACAACTAACCTCCTCTGCTTTGGCTGAAGGCCAG"
+    "CAGGACGCTGGGACCTGATGGGCCACTGTGCAGTGCACAGCTGCATTAGGCAGGTGTCGGCGCATTCTCTTATTGGCTTC"
+    "AACGCCTAGTGAGGGATCCATCCTGGCTCGGTGGCGCATTTGTTAAGATGCTCGGGAGCAGGTGGCAGAACCCATTTGAG"
+    "CTTGCTTGGGCATTGGGGAGAATTTGTTATCAGGCTACTGGGGTGTCACAGAACTCAAGGACAGGGACTGGAGTGTTGTG"
+    "GGGAGCCCCGAAGCCCCTGTTTTACTTCTTTCTTTGCTTTTCCTGAATATCTGCTTTATTCTTACTCTATAGACATGCTT"
+    "CCTCCTCTTTCACCCCACATTGTGGGGTGTAGTC"
 )
+
+# RHD7: NG_007494.1 positions 38707..39640 (934 bp). Spans exon 7
+# (39107..39240) with ~400 bp 5' flank (intron 6 tail) and ~400 bp 3'
+# flank (intron 7 head). Covers the c.1025 (Weak D type 2) diagnostic SNP.
+RHD7_REFERENCE = (
+    "TACTGGCAGCTCGTGGGGAGAGACCAGGGATGCTGCTTAACATCCTACAGTACACAGGGCAGCCCCCACCACAAGGAATT"
+    "ATCAGCTGAAATTGTGAACAGTGTCTACACTAGACCCTTGCTACTCATAGTGTGGTCCGTAGACCAGCAGCATTGGCATC"
+    "ACCTGGGACCTTGTTAGAAATGCTGTTAGACCCCACCCCACATCCACTAAAGCCAGCTCTTCATTTCAACAAACTCCCCG"
+    "ATGATGTGAGTGCACATTCAAGTCTGAGAAGGGCTTCTTTGAGGTGAGCCTTAGTGCCCATCCCCCTTTGGTGGCCCCGG"
+    "ATACCAAGGGTGTGTGAAAGGGGTGGGTAGGGAATATGGGTCTCACCTGCCAATCTGCTTATAATAACACTTGTCCACAG"
+    "GGGTGTTGTAACCGAGTGCTGGGGATTCCCCACAGCTCCATCATGGGCTACAACTTCAGCTTGCTGGGTCTGCTTGGAGA"
+    "GATCATCTACATTGTGCTGCTGGTGCTTGATACCGTCGGAGCCGGCAATGGCATGTGGGTCACTGGGCTTACCCCCCATC"
+    "CCCTTAACACTCCCCTCCAACTCAGGAAGAAATGTGTGCAGAGTCCTTAGCTGGGGCGTGTGCACTCGGGGCCAGGTGCT"
+    "CAGTAGGCTTCGGTGAATATTTGTTGGCTGATTTATTCAGAAATTCTGTCCAGCCCCTACCTTGGATGGATTTATCACCT"
+    "CTCCAGGCCACCTCTTCTTTCCAAATAGGGCCACCTAGGTATAGACCAAAGACACGAAATCTTTTGTGATCCCACAAACA"
+    "CAGAGCAGGTCAAATAGGCCCAAGCCAATTGAGACTGTGGTTCAGGTCGTGATGCAGAGCTTTGCTGTGGACGTGCTCCC"
+    "ACTGCGTACTAGCTGGGCATGTGGCTTAACCTTTCTCAGCCTCAGTCGCCCCAT"
+)
+
+
+# RHD9: NG_007494.1 positions 54000..54873 (874 bp). Spans exon 9
+# (54400..54473) with ~400 bp 5' flank (intron 8 tail) and ~400 bp 3'
+# flank (intron 9 head). Covers the c.1154 (Weak D type 3) and c.1227
+# (Weak D type 4 / Asian DEL) diagnostic SNPs.
+RHD9_REFERENCE = (
+    "CATCTCTACTAAAAAAAAAAAAAAAAAAAAAATTAGCTGGATGTGGTGGCAGGCGCCTATAATCTCAGCTACTTGGGAGG"
+    "CTGAGGCAGGATAATCGCTTGAACCTGGGAGGCAGAGGCTGCAGTGAGCCGAGATCACGCCATTGTACTCCAGCCTGGGC"
+    "GATAGAGTGAGACTCTGTCTCAAAATAAATAAAATAAAATAAAATAAAATAAAATAAAATAGGCTACAGAATTAAGCTGG"
+    "TCCAGGAATGACAGGGCTTCCATTTATTTGTCTTTCAATTGTGGGAGAAAAAGGATTTCTGTTGAGATACTGTCGTTTTG"
+    "ACACACAATATTTCGATTAATCTTGAGATTAAAAATCCTGTGCTCCAAATCTTTTAACATTAAATTATGCATTTAAACAG"
+    "GTTTGCTCCTAAATCTTAAAATATGGAAAGCACCTCATGAGGCTAAATATTTTGATGACCAAGTTTTCTGGAAGGTAAGA"
+    "TTTTTCACCTATTAACGTGATAGATTTTGAGTGCATGAACTTAAAAACATACCTGAGTATATATGTTGACTTGCTGTTTA"
+    "TGAGTAAAACAAAAACAAAAATGGAGTAAGGAGCATTGCAGGAGGAACTAGAGGAGAAACAAATCCATGATATGCATGTG"
+    "TGTGGGGGAGGGTGGCGGGGAGGTGGTAAAGGTCACCATTTCCCTGATACCTCAAATTCATTCAGAGTCAGGGATGAGAC"
+    "AGCTTTCACTGGCCACACTTCCCCTCCCCCTATCTGCAGTCCTCAGCGTAGCCAAATAGTCTGACATGCGGGTGACAGAA"
+    "CCCCACAATGCAAAAGCTGGAAGAAACCTCAAGCCTTGGAGTCCAACCCCTTTTTTGACAGATGCTAAGAGTGG"
+)
+
+
+# ─── cDNA → genomic coordinate mapping ────────────────────────────────────
+# CDS exons of NG_007494.1 (1-based inclusive genomic coordinates), used
+# to map cDNA positions (c.1 = first base of CDS at genomic 5059) to
+# genomic positions in NG_007494.1, and from there to slice indices in
+# RHD1_REFERENCE / RHD456_REFERENCE.
+_CDS_EXONS_NG_007494_1 = [
+    (5059, 5206),    # exon 1 (CDS starts at the ATG codon)
+    (17084, 17270),  # exon 2
+    (23152, 23302),  # exon 3
+    (33457, 33604),  # exon 4
+    (34031, 34197),  # exon 5
+    (35833, 35970),  # exon 6
+    (39107, 39240),  # exon 7
+    (49511, 49590),  # exon 8
+    (54400, 54473),  # exon 9
+    (61409, 61435),  # exon 10 (CDS ends at the TAG stop codon)
+]
+
+# 1-based genomic start of each per-amplicon slice within NG_007494.1.
+RHD1_GENOMIC_START   = 4341   # RHD1_REFERENCE covers 4341..5291
+RHD456_GENOMIC_START = 33057  # RHD456_REFERENCE covers 33057..36370
+RHD7_GENOMIC_START   = 38707  # RHD7_REFERENCE covers 38707..39640
+RHD9_GENOMIC_START   = 54000  # RHD9_REFERENCE covers 54000..54873
+
+
+def _cdna_to_genomic_pos(c_pos):
+    """Map a 1-based cDNA position (c.1 = first base of CDS) to a 1-based
+    genomic position in NG_007494.1, or None if c_pos exceeds the CDS.
+    """
+    remaining = c_pos
+    for (start, end) in _CDS_EXONS_NG_007494_1:
+        length = end - start + 1
+        if remaining <= length:
+            return start + remaining - 1
+        remaining -= length
+    return None
+
 
 # ISBT Standards - Identity thresholds
 IDENTITY_RHD_POSITIVE = 90.0  # % - minimum identity to confirm RHD gene present
@@ -194,34 +316,50 @@ MIN_PHRED_AT_SNP = 30   # per-base Phred Q-score required AT each diagnostic
 # They vote 'Inconclusive' instead of polluting RhD+/RhD- with garbage.
 MIN_AMPLICON_IDENTITY = 75.0
 
-# Per-region vote weights. RHD456 covers exons 4-6, which contain the major
-# D antigen determinants and the SNPs that actually discriminate RHD from
-# RHCE. RHD1 (exon 1) is highly conserved between RHD and RHCE, so a
-# high-identity hit there can reflect cross-amplification of RHCE rather
-# than RHD presence — it gets unit weight while RHD456 evidence counts double.
-REGION_VOTE_WEIGHT = {'RHD1': 1, 'RHD456': 2}
+# Per-region vote weights. RHD456, RHD7 and RHD9 cover the diagnostic
+# SNP-bearing exons (4-6 for major D antigen determinants and partial-D
+# markers; 7 for Weak D type 2; 9 for Weak D type 3/4 and Asian DEL
+# c.1227G>A). RHD1 (exon 1) is highly conserved between RHD and RHCE, so
+# a high-identity hit there can reflect cross-amplification of RHCE
+# rather than RHD presence — it gets unit weight while the SNP-bearing
+# regions count double.
+REGION_VOTE_WEIGHT = {'RHD1': 1, 'RHD456': 2, 'RHD7': 2, 'RHD9': 2}
 
 
 class RHDAnalyzer:
     def __init__(self, gb_path=None, reference_seq=None):
         """
-        Initialize RHD Analyzer with WHO standard references.
-        Can load from GenBank file or use embedded references.
+        Initialize RHD Analyzer with NG_007494.1 references.
+
+        By default lazily loads the bundled RefSeqGene file at
+        ``utils/data/rhd_referance.gb`` so ``self.reference_seq`` and
+        ``self.exon_map`` populate without the caller passing ``gb_path``.
+        This unblocks sequence-content routing in
+        ``utils/bloodgroup/router.py`` (which keys off ``reference_seq``).
+        The per-amplicon embedded slices (RHD1_REFERENCE, RHD456_REFERENCE)
+        are independent of this load — analysis still works if the data
+        file is absent.
         """
         self.reference_seq = None
         self.exon_map = []
         self.rhd1_ref = RHD1_REFERENCE
         self.rhd456_ref = RHD456_REFERENCE
+        self.rhd7_ref = RHD7_REFERENCE
+        self.rhd9_ref = RHD9_REFERENCE
         self._aligner = self._build_aligner()
 
-        # Try to load from GenBank if provided
-        if gb_path and reference_seq is None:
+        # Resolve which GenBank file to load: explicit gb_path wins, otherwise
+        # fall back to the bundled NG_007494.1. reference_seq=... still
+        # short-circuits any file load.
+        load_path = gb_path or (_DEFAULT_GB_PATH if _DEFAULT_GB_PATH.exists() else None)
+        if load_path and reference_seq is None:
             try:
-                record = SeqIO.read(gb_path, "genbank")
+                record = SeqIO.read(str(load_path), "genbank")
                 self.reference_seq = str(record.seq)
                 self.exon_map = self._get_exon_map(record)
             except Exception:
-                # Fall back to embedded references
+                # Embedded RHD1/RHD456 chunks still work for per-amplicon
+                # analysis; router just won't list RHD as a routing target.
                 pass
 
     def _get_exon_map(self, record):
@@ -235,7 +373,9 @@ class RHDAnalyzer:
         exons.sort()
         return exons
 
-    def detect_amplicon_region(self, query_length, identity_rhd1, identity_rhd456):
+    def detect_amplicon_region(self, query_length, identity_rhd1,
+                               identity_rhd456, identity_rhd9=0.0,
+                               identity_rhd7=0.0):
         """Pick the better-fitting reference by alignment identity.
 
         Length used to drive this decision, but Sanger trace length depends
@@ -246,10 +386,18 @@ class RHDAnalyzer:
         RHD456_REFERENCE at >>RHD1_REFERENCE regardless of read length.
 
         ``query_length`` is kept for signature compatibility but unused.
+        ``identity_rhd7`` / ``identity_rhd9`` default to 0.0 so legacy
+        2-arg callers still pick between RHD1 and RHD456 only.
         """
-        return 'RHD456' if identity_rhd456 >= identity_rhd1 else 'RHD1'
+        scores = {
+            'RHD1':   identity_rhd1,
+            'RHD456': identity_rhd456,
+            'RHD7':   identity_rhd7,
+            'RHD9':   identity_rhd9,
+        }
+        return max(scores, key=scores.get)
 
-    def _detect_rhdpsi(self, query_seq, variants):
+    def _detect_rhdpsi(self, query_seq, variants, ref_seq=None):
         """
         RHDψ (pseudogene) detection per Singleton et al. 2000 (Blood 95:12)
         and Chiu et al. 2001. MUST run before identity-based calling.
@@ -258,6 +406,15 @@ class RHDAnalyzer:
           M1 - 37bp duplication in intron 3 (pathognomonic)
           M2 - W269X stop codon (807T>G); detected as TGA where TGG is normal
           M3 - large insertion (>=30bp) seen in alignment, supports M1
+
+        Reference-context guard (``ref_seq``):
+          The 29 bp PSI_37BP signature has an incidental k-mer collision in
+          normal NG_007494.1 — specifically its reverse complement appears
+          once at intron-5 position 34231, which falls inside the RHD456
+          amplicon footprint. If the SAME signature appears in the aligned
+          slice (i.e., is explained by normal RHD sequence in this region),
+          M1 alone is no longer sufficient evidence for a Psi call. M1+M2
+          together remains specific and is unaffected.
         """
         PSI_37BP   = "CATAAATATGTGTGCTAGTCCTGTTAGAC"
         PSI_STOP   = "CCTTTGGGGGTGA"   # W269X: TGA stop codon
@@ -267,6 +424,13 @@ class RHDAnalyzer:
         q_rc = str(Seq(q).reverse_complement()) if q else ""
 
         m1 = (PSI_37BP in q) or (PSI_37BP in q_rc)
+
+        m1_explained_by_ref = False
+        if m1 and ref_seq:
+            r = ref_seq.upper()
+            r_rc = str(Seq(r).reverse_complement())
+            m1_explained_by_ref = (PSI_37BP in r) or (PSI_37BP in r_rc)
+
         m2 = ((PSI_STOP in q or PSI_STOP in q_rc)
               and (NORMAL_TRP not in q and NORMAL_TRP not in q_rc))
         m3 = any(
@@ -276,9 +440,8 @@ class RHDAnalyzer:
             for v in (variants or [])
         )
 
-        # M1 is the pathognomonic marker. M3 (large indel from alignment) is
-        # only supporting evidence - on its own it fires for any garbage
-        # sequence with bad alignment, so we require M1 for any PSI call.
+        # M1 + M2 together is independent biological evidence — keep the
+        # HIGH-confidence call even if M1 alone could be explained by ref.
         if m1 and m2:
             return {
                 'is_rhdpsi':   True,
@@ -287,7 +450,9 @@ class RHDAnalyzer:
                 'mechanism':   '37bp intron 3 insertion + W269X stop codon (807T>G)',
                 'markers':     {'37bp_insertion': True, 'W269X_stop': True, 'large_indel': m3}
             }
-        if m1:
+        # M1 alone is meaningful only when the marker is NOT explainable
+        # by normal RHD sequence in the aligned slice.
+        if m1 and not m1_explained_by_ref:
             return {
                 'is_rhdpsi':   True,
                 'confidence':  'MEDIUM',
@@ -298,13 +463,19 @@ class RHDAnalyzer:
         return {'is_rhdpsi': False}
 
     def determine_rhd_phenotype_snp_based(self, identity, diagnostic_snps,
-                                          query_seq="", variants=None):
+                                          query_seq="", variants=None,
+                                          aligned_ref_seq=None):
         """
         ISBT priority-ordered decision tree:
           P1: RHDψ (pseudogene)        — ALWAYS first
           P2: Complete RHD deletion    — identity < 60%
           P3: Weak D / Partial D / DEL — ISBT SNP-based
           P4: Identity-based fallback  — only if no ISBT marker matched
+
+        ``aligned_ref_seq`` (optional) is the per-amplicon slice the query
+        was aligned against; used by ``_detect_rhdpsi`` to suppress M1-alone
+        Psi calls when the marker is explainable by normal RHD sequence in
+        the aligned region.
 
         Returns a dict with phenotype, allele, reason, and (when relevant)
         mechanism/confidence/serology/note. The analyze() method unpacks it.
@@ -323,7 +494,7 @@ class RHDAnalyzer:
             return ''
 
         # ── PRIORITY 1: RHDψ (pseudogene) ────────────────────────────────
-        psi = self._detect_rhdpsi(query_seq, variants)
+        psi = self._detect_rhdpsi(query_seq, variants, ref_seq=aligned_ref_seq)
         if psi['is_rhdpsi']:
             return {
                 'phenotype':   'RhD- (D negative)',
@@ -505,44 +676,82 @@ class RHDAnalyzer:
         query_seq_str = str(query_seq)
         query_length = len(query_seq_str)
 
-        # Analyze against both RHD1 and RHD456 references
-        rhd1_forward = self._analyze_against_reference(query_seq_str, self.rhd1_ref, 'forward')
-        rhd1_reverse = self._analyze_against_reference(query_seq_str, self.rhd1_ref, 'reverse')
+        # Analyze against all four per-amplicon references (RHD1 / RHD456
+        # / RHD7 / RHD9) in both strands. RHD7 carries c.1025 (Weak D type
+        # 2); RHD9 carries c.1154 (Weak D type 3) and c.1227 (Weak D type
+        # 4 / Asian DEL).
+        rhd1_forward   = self._analyze_against_reference(query_seq_str, self.rhd1_ref,   'forward')
+        rhd1_reverse   = self._analyze_against_reference(query_seq_str, self.rhd1_ref,   'reverse')
         rhd456_forward = self._analyze_against_reference(query_seq_str, self.rhd456_ref, 'forward')
         rhd456_reverse = self._analyze_against_reference(query_seq_str, self.rhd456_ref, 'reverse')
+        rhd7_forward   = self._analyze_against_reference(query_seq_str, self.rhd7_ref,   'forward')
+        rhd7_reverse   = self._analyze_against_reference(query_seq_str, self.rhd7_ref,   'reverse')
+        rhd9_forward   = self._analyze_against_reference(query_seq_str, self.rhd9_ref,   'forward')
+        rhd9_reverse   = self._analyze_against_reference(query_seq_str, self.rhd9_ref,   'reverse')
 
         # Choose best alignment for each region
-        rhd1_result = rhd1_forward if rhd1_forward['identity'] >= rhd1_reverse['identity'] else rhd1_reverse
+        rhd1_result   = rhd1_forward   if rhd1_forward['identity']   >= rhd1_reverse['identity']   else rhd1_reverse
         rhd456_result = rhd456_forward if rhd456_forward['identity'] >= rhd456_reverse['identity'] else rhd456_reverse
+        rhd7_result   = rhd7_forward   if rhd7_forward['identity']   >= rhd7_reverse['identity']   else rhd7_reverse
+        rhd9_result   = rhd9_forward   if rhd9_forward['identity']   >= rhd9_reverse['identity']   else rhd9_reverse
 
         # Auto-detect which region this is
-        region = self.detect_amplicon_region(query_length, rhd1_result['identity'], rhd456_result['identity'])
+        region = self.detect_amplicon_region(
+            query_length,
+            rhd1_result['identity'],
+            rhd456_result['identity'],
+            rhd9_result['identity'],
+            identity_rhd7=rhd7_result['identity'],
+        )
 
         # Get result for detected region
         if region == 'RHD1':
             result = rhd1_result.copy()
             ref_seq = self.rhd1_ref
-        else:
+            slice_start = RHD1_GENOMIC_START
+        elif region == 'RHD456':
             result = rhd456_result.copy()
             ref_seq = self.rhd456_ref
+            slice_start = RHD456_GENOMIC_START
+        elif region == 'RHD7':
+            result = rhd7_result.copy()
+            ref_seq = self.rhd7_ref
+            slice_start = RHD7_GENOMIC_START
+        else:  # RHD9
+            result = rhd9_result.copy()
+            ref_seq = self.rhd9_ref
+            slice_start = RHD9_GENOMIC_START
 
         # Extract all variants (including insertions/deletions for RHDψ check)
         variants = self._extract_variants_simple(query_seq_str, ref_seq)
 
-        # Detect diagnostic SNPs (ISBT-defined for RhD subtyping).
-        # When AB1 Phred quality is plumbed through, each SNP is gated at
-        # Q30 — silently suppressed if the base at the SNP position is
-        # below threshold (lab-standard CAP/CLIA practice).
-        diagnostic_snps = self._detect_diagnostic_snps(
-            query_seq_str, ref_seq, query_quality=query_quality,
+        # Detect diagnostic SNPs (ISBT-defined for RhD subtyping) via the
+        # alignment-coordinate path: cDNA position -> NG_007494.1 genomic
+        # position -> per-amplicon slice index -> alignment column ->
+        # query base. The legacy positional approach (still kept on the
+        # analyzer for the unit-test contract) silently failed for any
+        # SNP whose c.position didn't coincide with a slice index. Phred
+        # gating at MIN_PHRED_AT_SNP is applied here when AB1 quality is
+        # plumbed through.
+        diagnostic_snps = self._detect_diagnostic_snps_in_alignment(
+            alignment=result.get('alignment'),
+            slice_start=slice_start,
+            ref_seq=ref_seq,
+            strand=result['strand'],
+            original_query_seq=query_seq_str,
+            original_query_quality=query_quality,
         )
 
-        # ISBT priority decision tree (RHDψ -> deletion -> SNPs -> identity)
+        # ISBT priority decision tree (RHDψ -> deletion -> SNPs -> identity).
+        # Pass the winning per-amplicon slice as aligned_ref_seq so the Psi
+        # detector can suppress M1-only false positives caused by an
+        # incidental marker collision in NG_007494.1 intron 5.
         decision = self.determine_rhd_phenotype_snp_based(
             result['identity'],
             diagnostic_snps,
             query_seq=query_seq_str,
             variants=variants,
+            aligned_ref_seq=ref_seq,
         )
 
         # Compile final result
@@ -620,6 +829,126 @@ class RHDAnalyzer:
             return 0.0
 
         return (matches / aligned_positions) * 100.0
+
+    @staticmethod
+    def _walk_alignment_to_ref_pos(alignment, ref_pos_0based):
+        """Walk a local PairwiseAlignment to find the column where the
+        reference index equals ``ref_pos_0based``. Returns
+        ``(query_base, query_idx_in_aligned_seq)`` at that column, or
+        ``(None, None)`` if the position is outside the alignment or the
+        query has a gap there.
+
+        ``alignment.coordinates[0][0]`` is the start position on the
+        reference (slice index); ``[1][0]`` is the start position on the
+        (possibly reverse-complemented) query that was passed to the
+        aligner. Callers must remap ``query_idx_in_aligned_seq`` back to
+        the original-strand query index when looking up Phred scores.
+        """
+        if alignment is None:
+            return (None, None)
+        try:
+            ref_aligned = str(alignment[0])
+            query_aligned = str(alignment[1])
+            cur_ref_idx = int(alignment.coordinates[0][0])
+            cur_query_idx = int(alignment.coordinates[1][0])
+        except (AttributeError, IndexError, TypeError):
+            return (None, None)
+
+        for r, q in zip(ref_aligned, query_aligned):
+            if cur_ref_idx == ref_pos_0based:
+                return (None, None) if q == '-' else (q, cur_query_idx)
+            if r != '-':
+                cur_ref_idx += 1
+            if q != '-':
+                cur_query_idx += 1
+        return (None, None)
+
+    def _detect_diagnostic_snps_in_alignment(
+            self, alignment, slice_start, ref_seq,
+            strand='forward', original_query_seq=None,
+            original_query_quality=None,
+    ):
+        """Production SNP detection: maps each ISBT cDNA position to a
+        slice index via NG_007494.1 CDS coordinates, then walks the
+        alignment to find the query base at that ref column.
+
+        Correct for genomic amplicons. The legacy
+        ``_detect_diagnostic_snps`` (positional indexing) silently failed
+        for any SNP whose cDNA position didn't happen to coincide with a
+        slice index — which was 5 of 6 SNPs in practice.
+
+        Returns a dict keyed by SNP name, matching the legacy schema.
+        """
+        detected = {}
+        if alignment is None or ref_seq is None or slice_start is None:
+            return detected
+
+        for snp_name, snp_info in DIAGNOSTIC_SNP_POSITIONS.items():
+            c_pos = snp_info['cDNA_position']
+            genomic_pos = _cdna_to_genomic_pos(c_pos)
+            if genomic_pos is None:
+                continue
+
+            slice_idx = genomic_pos - slice_start
+            if slice_idx < 0 or slice_idx >= len(ref_seq):
+                continue
+
+            if ref_seq[slice_idx].upper() != snp_info['ref_base']:
+                # Slice content doesn't match the expected reference base
+                # at the mapped position — coord map or slice is wrong.
+                continue
+
+            query_base, q_idx_aligned = self._walk_alignment_to_ref_pos(
+                alignment, slice_idx)
+            if query_base is None:
+                continue
+            query_base = query_base.upper()
+            if query_base in ('N', '-'):
+                continue
+
+            decoded = IUPAC_DECODE.get(query_base, query_base)
+            ref_b = snp_info['ref_base']
+            alt_b = snp_info['alt_base']
+
+            if alt_b in decoded and ref_b in decoded and len(decoded) == 2:
+                zygosity = 'het'
+            elif decoded == alt_b:
+                zygosity = 'hom'
+            else:
+                continue
+
+            # Phred gate. The aligned-query index is into the strand-
+            # corrected query that was passed to the aligner; map back to
+            # the original query index for Phred lookup (Phred is in
+            # original-sequencer orientation).
+            phred_at_snp = None
+            if (original_query_quality is not None
+                    and original_query_seq is not None
+                    and q_idx_aligned is not None):
+                if strand == 'reverse':
+                    orig_idx = len(original_query_seq) - 1 - q_idx_aligned
+                else:
+                    orig_idx = q_idx_aligned
+                if 0 <= orig_idx < len(original_query_quality):
+                    phred_at_snp = int(original_query_quality[orig_idx])
+                    if phred_at_snp < MIN_PHRED_AT_SNP:
+                        continue
+
+            entry = {
+                'exon': snp_info['exon'],
+                'cDNA_position': c_pos,
+                'reference_base': ref_b,
+                'query_base': query_base,
+                'zygosity': zygosity,
+                'alleles': snp_info['alleles'],
+                'significance': snp_info['significance'],
+                'reference': snp_info['reference'],
+            }
+            if phred_at_snp is not None:
+                entry['phred_at_snp'] = phred_at_snp
+            detected[snp_name] = entry
+
+        return detected
 
     def _detect_diagnostic_snps(self, query_seq, ref_seq, query_quality=None):
         """
