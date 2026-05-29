@@ -32,7 +32,8 @@
       "PowerShell(python -m pytest tests/test_jk_analyzer.py --tb=line -q 2>&1)",
       "PowerShell(python tmp_di_patient.py)",
       "Bash(python -m py_compile C:/Users/ExPertComputer/Desktop/ABO_streamlit_version/main.py C:/Users/ExPertComputer/Desktop/ABO_streamlit_version/utils/bloodgroup/router.py)",
-      "PowerShell(python -c \"from utils.bloodgroup.router import route_filename; tests = ['TSN20251010-010-00025_KEL56-NP_test.ab1', 'TSN20251113-010-00152_RHCE45-1_test.fasta', 'MIA234-1_amplicon.fasta', 'FY12-NP.fasta', 'JK78-1.fasta', 'JK89-NP.fasta', 'DI1819-NP.fasta', 'RHD1-NP.fasta', 'RHD456-1.fasta', 'ABO_exon7.fasta', 'random_unknown.fasta', 'FUT1_sample.fasta']; print\\('Filename routing test:'\\); [print\\(f'  {fn!r:60} -> {route_filename\\(fn\\)}'\\) for fn in tests]\")"
+      "PowerShell(python -c \"from utils.bloodgroup.router import route_filename; tests = ['TSN20251010-010-00025_KEL56-NP_test.ab1', 'TSN20251113-010-00152_RHCE45-1_test.fasta', 'MIA234-1_amplicon.fasta', 'FY12-NP.fasta', 'JK78-1.fasta', 'JK89-NP.fasta', 'DI1819-NP.fasta', 'RHD1-NP.fasta', 'RHD456-1.fasta', 'ABO_exon7.fasta', 'random_unknown.fasta', 'FUT1_sample.fasta']; print\\('Filename routing test:'\\); [print\\(f'  {fn!r:60} -> {route_filename\\(fn\\)}'\\) for fn in tests]\")",
+      "Bash(python -m pytest tests/test_rhd_iupac_and_qtrim.py --tb=short)"
     ]
   }
 }
