@@ -1,122 +1,97 @@
-#!/usr/bin/env python
-"""Test RHD analysis with all patient samples"""
+"""Regression test against the lab's real patient panels.
+
+Reads RHD1 / RHD456 / RHD7 / RHD9 amplicon FASTAs from each patient folder,
+runs ``RHDAnalyzer.analyze_multiple_amplicons``, and asserts the final
+verdict matches the lab-confirmed RhD+/RhD- expectation.
+
+Test data is read from a local lab directory and is not shipped with the
+repo; the test is skipped (not failed) when the directory is absent.
+"""
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
 
+import pytest
 from Bio import SeqIO
-from utils.rhd_analyzer import RHDAnalyzer
 
-def test_all_patients():
-    """Analyze RHD1 samples from all available patients"""
-    print("=" * 80)
-    print("MULTI-PATIENT RHD ANALYSIS TEST")
-    print("=" * 80)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-    test_data_path = Path(r"C:\Users\ExPertComputer\Downloads\ผล blood group NGS_term paper 2568 ใบปอ")
+from utils.rhd_analyzer import RHDAnalyzer  # noqa: E402
 
-    if not test_data_path.exists():
-        print(f"[ERROR] Test data path not found: {test_data_path}")
-        return False
 
-    analyzer = RHDAnalyzer()
-    patient_dirs = [d for d in test_data_path.iterdir() if d.is_dir()]
+# Lab data root. The previous hard-coded path pointed at
+# Downloads\ผล blood group NGS_term paper 2568 ใบปอ\; the actual local
+# copy lives under Desktop\blood_group\.
+PATIENT_DATA_ROOT = Path(r"C:\Users\ExPertComputer\Desktop\blood_group")
 
-    if not patient_dirs:
-        print(f"[ERROR] No patient directories found in {test_data_path}")
-        return False
+# Short label -> (folder name within PATIENT_DATA_ROOT, expected RhD status).
+# Folder names include Thai annotations from the lab notebook.
+PATIENTS = [
+    ("Ake",   "Ake นศ.ป.เอก อ.น้ำผึ้ง ทำ uveitis",         "RhD+"),
+    ("Baipo", "Baipoh",                                       "RhD+"),
+    ("Chon",  "Chonticha",                                    "RhD+"),
+    ("Dada",  "Dada",                                         "RhD+"),
+    ("Earn",  "Erng น้องเอิงเพื่อนใบปอ นศ.เทอมอ.เจี๊ยบ",  "RhD+"),
+    ("Eye",   "Eye",                                          "RhD+"),
+    ("GG",    "Gungging นศ.ปี 3 น้องสายโคใบปอ",          "RhD+"),
+    ("KT",    "Kittiphon Rh neg เพื่อนอจ ฝ้าย",          "RhD-"),
+    ("NP",    "Nampeung",                                     "RhD+"),
+]
 
-    print(f"\n[INFO] Found {len(patient_dirs)} patient(s)\n")
+# Per-patient amplicon subfolders. RHD7/RHD9 are listed for forward
+# compatibility — most current panels only ship RHD1 + RHD456. RHD456_fail
+# is included because Eye's RHD456 reads live there.
+AMPLICON_SUBDIRS = ["RHD1", "RHD456", "RHD7", "RHD9", "RHD456_fail"]
 
-    summary_results = {}
 
-    for patient_dir in patient_dirs:
-        patient_name = patient_dir.name
-        rhd1_path = patient_dir / "RHD1"
-
-        if not rhd1_path.exists():
+def _collect_reads(patient_dir: Path):
+    """Return list of (read_name, sequence) from every FASTA in the
+    patient's RHD amplicon subdirectories."""
+    reads = []
+    for sub in AMPLICON_SUBDIRS:
+        d = patient_dir / sub
+        if not d.exists():
             continue
+        for fa in sorted(d.glob("*.fasta")):
+            rec = next(iter(SeqIO.parse(str(fa), "fasta")), None)
+            if rec is None:
+                continue
+            seq = str(rec.seq).upper()
+            if len(seq) < 50:
+                continue
+            reads.append((fa.name, seq))
+    return reads
 
-        print(f"\n{'='*80}")
-        print(f"PATIENT: {patient_name}")
-        print(f"{'='*80}")
 
-        rhd_files = sorted(rhd1_path.glob("*.fasta"))
-        rhd_plus_count = 0
-        rhd_minus_count = 0
+@pytest.mark.parametrize("label,folder,expected", PATIENTS,
+                         ids=[p[0] for p in PATIENTS])
+def test_patient_rhd_verdict(label, folder, expected):
+    if not PATIENT_DATA_ROOT.exists():
+        pytest.skip(f"Lab data root not available: {PATIENT_DATA_ROOT}")
 
-        if not rhd_files:
-            print(f"  [WARNING] No FASTA files found")
-            continue
+    patient_dir = PATIENT_DATA_ROOT / folder
+    if not patient_dir.exists():
+        pytest.skip(f"Patient folder missing: {patient_dir}")
 
-        print(f"\n  [RHD1 Amplicon Analysis] ({len(rhd_files)} files)")
-        print(f"  {'-'*76}")
+    reads = _collect_reads(patient_dir)
+    assert reads, f"No RHD FASTA reads found under {patient_dir}"
 
-        for i, fasta_file in enumerate(rhd_files[:3], 1):  # Show first 3 files per patient
-            try:
-                record = SeqIO.read(str(fasta_file), "fasta")
-                seq = str(record.seq)
-                result = analyzer.analyze(seq)
+    result = RHDAnalyzer().analyze_multiple_amplicons(reads)
+    verdict = result["final_verdict"]
+    votes = result.get("votes", {})
 
-                rhd_status = result['rhd_status']
-                length = result['query_length']
+    # Collapse "RhD+ (confirmed/probable/..)" -> "RhD+" for comparison.
+    if verdict.startswith("RhD+"):
+        short = "RhD+"
+    elif verdict.startswith("RhD-"):
+        short = "RhD-"
+    else:
+        short = "Inconclusive"
 
-                if 'RhD+' in rhd_status:
-                    rhd_plus_count += 1
-                    status_label = "[RhD+]"
-                elif 'RhD-' in rhd_status:
-                    rhd_minus_count += 1
-                    status_label = "[RhD-]"
-                else:
-                    status_label = "[????]"
-
-                print(f"\n  {i}. {fasta_file.name}")
-                print(f"     Length: {length} bp -> {status_label}")
-                print(f"     Identity: {result['identity']:.1f}%")
-
-            except Exception as e:
-                print(f"\n  {i}. {fasta_file.name}")
-                print(f"     [ERROR] {str(e)[:50]}")
-
-        total = len(rhd_files)
-        print(f"\n  SUMMARY for {patient_name}:")
-        print(f"    Total RHD1 files: {total}")
-        print(f"    RhD+ results: {rhd_plus_count if rhd_plus_count > 0 else 'None analyzed'}")
-        print(f"    RhD- results: {rhd_minus_count if rhd_minus_count > 0 else 'None analyzed'}")
-
-        summary_results[patient_name] = {
-            'total': total,
-            'rhd_plus': rhd_plus_count,
-            'rhd_minus': rhd_minus_count
-        }
-
-    # Final summary
-    print(f"\n\n{'='*80}")
-    print("FINAL SUMMARY")
-    print(f"{'='*80}\n")
-
-    for patient_name, results in summary_results.items():
-        print(f"{patient_name}:")
-        if results['rhd_plus'] > 0 and results['rhd_minus'] == 0:
-            print(f"  RhD Status: RhD+ (POSITIVE - D antigen present)")
-        elif results['rhd_minus'] > 0 and results['rhd_plus'] == 0:
-            print(f"  RhD Status: RhD- (NEGATIVE - D antigen absent)")
-        elif results['rhd_plus'] > 0 and results['rhd_minus'] > 0:
-            print(f"  RhD Status: MIXED (variant or mixed genotype)")
-        else:
-            print(f"  RhD Status: INCONCLUSIVE")
-        print()
-
-    print(f"{'='*80}\n")
-    return True
-
-if __name__ == "__main__":
-    try:
-        success = test_all_patients()
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        print(f"\n[ERROR] Test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    assert short == expected, (
+        f"{label}: expected {expected}, got {verdict!r} "
+        f"(votes +:{votes.get('RhD+', 0)} "
+        f"-:{votes.get('RhD-', 0)} "
+        f"?:{votes.get('Inconclusive', 0)}, "
+        f"n_amplicons={result.get('total_amplicons')})"
+    )
