@@ -666,6 +666,10 @@ class FASTAAlignmentService:
                     'aligned_reference': aligned_ref_seq
                 }
 
+        if best_result is None:
+            return {'error': 'No significant exon match found'}
+        return best_result
+
     def get_exon_coverage_stats(self, query_sequence: str) -> List[Dict]:
         """
         Calculate coverage AND similarity statistics for ALL exons.

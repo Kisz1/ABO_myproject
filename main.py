@@ -52,61 +52,6 @@ IUPAC_CODES = {
     'N':	'A or C or G or T'}
 
 
-def plot_chromatogram_plotly_old(trace, base_width=2):
-    """
-    Create an interactive chromatogram plot with Plotly.
-
-    Parameters
-    ----------
-    trace : dict
-        Dictionary containing "A", "C", "G", "T", "pos", and "seq".
-    base_width : float
-        Controls horizontal scaling (pixels per base).
-    """
-    seq_len = len(trace["seq"])
-    width_px = max(800, int(seq_len * base_width))
-
-    fig = go.Figure()
-    x = list(range(seq_len))
-
-    # Plot each base channel
-    fig.add_trace(go.Scatter(
-        y=trace["A"], x=x, mode="lines", name="A", line=dict(color="green", width=1)))
-    fig.add_trace(go.Scatter(
-        y=trace["C"], x=x, mode="lines", name="C", line=dict(color="blue", width=1)))
-    fig.add_trace(go.Scatter(
-        y=trace["G"], x=x, mode="lines", name="G", line=dict(color="black", width=1)))
-    fig.add_trace(go.Scatter(
-        y=trace["T"], x=x, mode="lines", name="T", line=dict(color="red", width=1)))
-
-    # Optional: base labels (every Nth base)
-    step = max(1, seq_len // 100)
-    labels = [trace["seq"][i] if i % step == 0 else "" for i in range(seq_len)]
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=[0]*seq_len,
-        text=labels,
-        mode="text",
-        textposition="top center",
-        hoverinfo="skip",
-        showlegend=False
-    ))
-
-    fig.update_layout(
-        title=f"ABO Exon: {trace['exon']} (length={seq_len})",
-        width=width_px,
-        height=400,
-        xaxis_title="Base Index",
-        yaxis_title="Signal Intensity",
-        hovermode="x unified",
-        template="plotly_white",
-        legend=dict(orientation="h", y=-0.2),
-        margin=dict(l=40, r=20, t=40, b=40)
-    )
-
-    return fig
-
-
 def plot_chromatogram_plotly(trace, base_width=2, hetero_sites=None,
                              cds_start=None, cds_end=None):
     """
@@ -825,39 +770,6 @@ def consolidate_rhd_results(amplicon_results):
         }
     
     return result
-
-    types_list = {'SNP': 'alt_base', 'insertion': 'inserted_sequence',
-                  'deletion': 'deleted_sequence'}
-    het_variants = []
-    var_nodes = []
-    unknown = []
-    variant_base = i.get(types_list[types], "")
-    possible_bases = IUPAC_CODES.get(variant_base, variant_base).split(" or ")
-    ref_base = i.get('ref_base')
-
-    for base in possible_bases:
-        if not base:
-            continue
-
-        field = types_list[i['type']]
-        var_node = None
-        if i['type'] == 'deletion':
-            var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], base, "", variant_base)
-        elif i['type'] == 'insertion':
-            var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], "", base, variant_base)
-        else:
-            var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], ref_base, base, variant_base)
-
-        if var_node is not None:
-            var_nodes.append(var_node)
-            het_variants.append(i[field])
-        else:
-            if ref_base is None or base != ref_base:
-                unknown.append(i)
-    return var_nodes, het_variants, unknown
 
 
 def get_display_base(base):

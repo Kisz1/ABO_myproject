@@ -8,6 +8,9 @@ env/
 __pycache__/
 *.py[cod]
 *.pyo
+
+# Editor / atomic-write temp files
+*.tmp.*
 *.pyd
 *.egg-info/
 *.egg
