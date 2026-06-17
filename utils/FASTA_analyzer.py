@@ -10,9 +10,23 @@ import os
 from typing import Dict, List, Any 
 import utils.referece_loader as rl
 
- 
+
 GLOBAL = 1000
 DEBUG = False
+
+# ── ABO exon-confirmation gate (identify_variants / get_exon_coverage_stats) ──
+# Before calling variants, a query must first be confirmed as a given ABO exon
+# by a two-part match against that exon's reference:
+#   ABO_EXON_MIN_COVERAGE : % of the exon reference spanned by the alignment
+#                           (guards against short/partial reads matching by luck)
+#   ABO_EXON_MIN_SIMILARITY: % identity within the aligned region
+#                           (guards against a different exon aligning weakly)
+#   ABO_ALN_MIN_SCORE     : raw alignment-score noise floor below which coverage
+#                           and similarity are zeroed (treated as no signal).
+# Provenance + measured stability: docs/THRESHOLDS.md §ABO exon confirmation.
+ABO_EXON_MIN_COVERAGE = 80.0
+ABO_EXON_MIN_SIMILARITY = 70.0
+ABO_ALN_MIN_SCORE = 20
 
 try:
     from Bio.Align import PairwiseAligner
@@ -581,95 +595,6 @@ class FASTAAlignmentService:
             'alignment_length': alignment_length
         }
 
-    
-    def find_best_exon_match(self, query_sequence: str) -> Dict:
-        """
-        Align a query sequence against ALL exons to find the best match.
-        Checks both forward and reverse complement orientations.
-
-        Args:
-            query_sequence: The sequence to align
-
-        Returns:
-            Dictionary with best exon match details
-        """
-        if not self.abo_reference or 'exons' not in self.abo_reference:
-            return {'error': 'Exon data not available'}
-
-        best_result = None
-        highest_score = -float('inf')
-
-        # Create PairwiseAligner (Local alignment)
-        if not BIOPYTHON_AVAILABLE or PairwiseAligner is None:
-            return {'error': 'BioPython not available'}
-
-        aligner = PairwiseAligner() # type: ignore
-        aligner.mode = 'local'
-        aligner.match_score = self.local_alignment_params['match_score']
-        aligner.mismatch_score = self.local_alignment_params['mismatch_score']
-        aligner.open_gap_score = self.local_alignment_params['gap_open_penalty']
-        aligner.extend_gap_score = self.local_alignment_params['gap_extend_penalty']
-
-        # Pre-calculate reverse complement of query
-        try:
-            query_fwd = query_sequence
-            query_rev = str(Seq(query_sequence).reverse_complement())
-        except Exception as e:
-            return {'error': f"Failed to generate reverse complement: {e}"}
-
-        for exon in self.abo_reference['exons']:
-            exon_num = exon['exon_number']
-            exon_seq = exon['sequence']
-
-            # Helper to check one orientation
-            def check_orient(q_seq, orient_name):
-                # Use simple alignment first to get score
-                # Note: aligner.score() is faster than aligner.align() if we just want the score
-                score = aligner.score(q_seq, exon_seq)
-                return score
-
-            # Check Forward
-            score_fwd = check_orient(query_fwd, 'forward')
-            
-            # Check Reverse
-            score_rev = check_orient(query_rev, 'reverse')
-
-            # Determine best for this exon
-            current_best_score = max(score_fwd, score_rev)
-            current_orientation = 'forward' if score_fwd >= score_rev else 'reverse'
-            current_seq = query_fwd if current_orientation == 'forward' else query_rev
-
-            if current_best_score > highest_score:
-                highest_score = current_best_score
-                
-                # generate full alignment object for the winner to get details
-                alignments = aligner.align(current_seq, exon_seq)
-                best_aln = alignments[0]
-                
-                aligned_ref_seq, aligned_query_seq = self._extract_aligned_sequences(best_aln)
-                alignment_length = len(aligned_query_seq)
-                matches = sum(1 for q, r in zip(aligned_query_seq, aligned_ref_seq) if q == r and q != '-' and r != '-')
-                similarity = matches / alignment_length if alignment_length > 0 else 0
-
-                best_result = {
-                    'exon_number': exon_num,
-                    'orientation': current_orientation,
-                    'alignment_score': current_best_score,
-                    'similarity': similarity,
-                    'matches': matches,
-                    'length': alignment_length,
-                    'query_start': best_aln.coordinates[0][0],
-                    'query_end': best_aln.coordinates[0][-1],
-                    'ref_start': best_aln.coordinates[1][0], # Exon-relative
-                    'ref_end': best_aln.coordinates[1][-1],   # Exon-relative
-                    'aligned_query': aligned_query_seq,
-                    'aligned_reference': aligned_ref_seq
-                }
-
-        if best_result is None:
-            return {'error': 'No significant exon match found'}
-        return best_result
-
     def get_exon_coverage_stats(self, query_sequence: str) -> List[Dict]:
         """
         Calculate coverage AND similarity statistics for ALL exons.
@@ -749,7 +674,7 @@ class FASTAAlignmentService:
                 similarity_pct = (matches / aln_len * 100) if aln_len > 0 else 0.0
 
                 # Sanity check: if scores are exceedingly low, assume noise
-                if best_aln.score < 20: 
+                if best_aln.score < ABO_ALN_MIN_SCORE:
                     coverage_pct = 0.0
                     similarity_pct = 0.0
 
@@ -782,7 +707,7 @@ class FASTAAlignmentService:
         # Filter for confirmed matches
         candidates = []
         for s in stats:
-            if s['coverage'] >= 80.0 and s['similarity'] >= 70.0:
+            if s['coverage'] >= ABO_EXON_MIN_COVERAGE and s['similarity'] >= ABO_EXON_MIN_SIMILARITY:
                 candidates.append(s)
         
         if not candidates:

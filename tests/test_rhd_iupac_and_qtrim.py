@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.rhd_analyzer import RHDAnalyzer  # noqa: E402
-from main import quality_trim_and_mask  # noqa: E402
+from utils.file_processing import quality_trim_and_mask  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #

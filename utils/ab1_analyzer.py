@@ -8,7 +8,27 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.Align import PairwiseAligner
 import utils.referece_loader as rl
- 
+
+
+# ── Heterozygote-calling thresholds (detect_hetero) ──────────────────────────
+# A Sanger position is called heterozygous when a secondary chromatogram peak
+# rises to a fraction of the major peak. These gate the secondary-peak call:
+#   HET_RATIO_DEFAULT  : minor/major signal floor to call a 2nd allele. 0.10 is
+#                        the permissive analyzer default; the clinical pipeline
+#                        overrides it to a stricter value (see
+#                        file_processing.HET_RATIO_PIPELINE). Provenance +
+#                        measured stability: docs/THRESHOLDS.md §Heterozygosity.
+#   HET_HALF_WINDOW    : +/- trace samples scanned around each base index (PLOC2)
+#                        to find the peak maximum (basecall jitter tolerance).
+#   HET_MIN_SUM        : minimum summed 4-channel signal; skips low-signal / gap
+#                        regions where a "minor peak" is just baseline noise.
+#   HET_MIN_MAJOR      : minimum major-peak height required before a position is
+#                        eligible at all (a real base must be clearly present).
+HET_RATIO_DEFAULT = 0.10
+HET_HALF_WINDOW = 3
+HET_MIN_SUM = 0.8
+HET_MIN_MAJOR = 0.5
+
 
 try:
     from Bio.Align import PairwiseAligner
@@ -263,7 +283,9 @@ class AB1Analyzer:
         out["seq"] = trace_data["seq"]
         return out
 
-    def detect_hetero(self,trace_data, ratio=0.10, half_window=3, min_sum=0.8, min_major=0.5):
+    def detect_hetero(self, trace_data, ratio=HET_RATIO_DEFAULT,
+                      half_window=HET_HALF_WINDOW, min_sum=HET_MIN_SUM,
+                      min_major=HET_MIN_MAJOR):
         """
         Heterozygosity on normalized signals.
         - ratio: minor/major >= ratio

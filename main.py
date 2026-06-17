@@ -21,6 +21,14 @@ from utils.di_analyzer import DIAnalyzer, DIReferenceMissingError
 from utils.isbt_handler import ISBTDataHandler
 from utils.bloodgroup import get_system, get_available_system_keys
 from utils.bloodgroup.router import route_filename
+from utils.file_processing import (
+    process_ab1_files, quality_trim_and_mask, process_rhd_ab1_files,
+    process_rhd_fasta_files, process_fasta_file,
+)
+from utils.rhd_logic import analyze_rhd_multifactor, consolidate_rhd_results
+from utils.abo_logic import (
+    get_display_base, handle_IUPAC_codes, identify_abo_alleles,
+)
 
 import plotly.graph_objects as go
 import itertools
@@ -309,603 +317,25 @@ def display_detailed_alignment_table(aligned_query, aligned_reference, variants=
         st.dataframe(df, width='stretch', height=400)
 
 
-def process_ab1_files(fwd_ab1_files, exons_ref, threshold_ratio=0.3):
-    """
-    Process AB1 files for RHD analysis.
 
-    For RHD analysis with multiple amplicons:
-    - Process EACH file separately (don't merge)
-    - Return list of individual traces
-    - Voting system uses all amplicons to determine RhD+/RhD-
-    """
-    ab1_service = ab1_utils.AB1Analyzer()
-    results = []
-    all_hets = []
 
-    # Process each AB1 file separately for multi-amplicon analysis
-    for ab1_file in fwd_ab1_files:
-        try:
-            trace = ab1_service.read_ab1_trace(ab1_file)
-            if not trace:
-                continue
 
-            # For single file or each file in batch: reverse chromatogram
-            reversed_trace = ab1_service.reverse_chromatogram(trace)
-            normalized_trace = ab1_service.normalize_trace_per_channel(reversed_trace)
 
-            # Detect heterozygotes in this file
-            raw_hets = ab1_service.detect_hetero(reversed_trace, ratio=threshold_ratio)
-            hets = []
-            for position, top_bases in raw_hets:
-                major_base, major_signal = top_bases[0]
-                minor_base, minor_signal = top_bases[1]
-                ratio = minor_signal / (major_signal + 1e-6)
-                hets.append({
-                    "position": position,
-                    "ref_base": major_base,
-                    "alt_base": minor_base,
-                    "ratio": ratio,
-                    "major_signal": major_signal,
-                    "minor_signal": minor_signal,
-                    "top_bases": top_bases
-                })
 
-            all_hets.extend(hets)
 
-            # Store trace with filename for RHD analysis identification
-            reversed_trace['filename'] = ab1_file.name
-            results.append(reversed_trace)
 
-        except Exception as e:
-            continue
 
-    if results:
-        return results, all_hets if all_hets else None
 
-    return None, None
 
 
-_BASES_TO_IUPAC = {
-    frozenset('AG'): 'R', frozenset('CT'): 'Y',
-    frozenset('CG'): 'S', frozenset('AT'): 'W',
-    frozenset('GT'): 'K', frozenset('AC'): 'M',
-}
 
 
-def quality_trim_and_mask(seq, qual, q_threshold=20, window=10):
-    """Sliding-window end-trim + internal-N-mask.
 
-    Returns (left, right, masked_seq, n_masked) where:
-      - ``seq[left:right]`` is the trimmed slice with internal low-Q bases
-        replaced by 'N' in ``masked_seq``
-      - ``n_masked`` counts the internal N substitutions
-    Returns (0, 0, '', 0) if the read is entirely below threshold.
-    """
-    n = len(seq)
-    if n == 0:
-        return 0, 0, '', 0
-    if len(qual) != n:
-        qual = [q_threshold] * n
 
-    w = min(window, n)
 
-    left = 0
-    while left + w <= n:
-        if all(q >= q_threshold for q in qual[left:left + w]):
-            break
-        left += 1
-    else:
-        return 0, 0, '', 0  # no clean 5' window found
 
-    right = n
-    while right - w >= left:
-        if all(q >= q_threshold for q in qual[right - w:right]):
-            break
-        right -= 1
-    else:
-        return 0, 0, '', 0  # no clean 3' window found
 
-    if right <= left:
-        return 0, 0, '', 0
 
-    trimmed = list(seq[left:right])
-    n_masked = 0
-    for i, q in enumerate(qual[left:right]):
-        if q < q_threshold:
-            trimmed[i] = 'N'
-            n_masked += 1
-
-    return left, right, ''.join(trimmed), n_masked
-
-
-def process_rhd_ab1_files(rhd_ab1_files, q_threshold=20, window=10, het_ratio=0.30):
-    """RHD-only AB1 processor with Phred trimming + signal-based het encoding.
-
-    Diverges from process_ab1_files (used by ABO) in three ways:
-      1. Captures Phred quality scores from the AB1 file.
-      2. Sliding-window end-trims and N-masks low-Q bases before SNP analysis.
-      3. Uses chromatogram signal (detect_hetero) to find heterozygous positions
-         and encodes them as IUPAC codes in the basecalled sequence so the
-         downstream RHDAnalyzer can detect heterozygous diagnostic SNPs.
-
-    Returns (results_list, hets_list_or_None) shaped like process_ab1_files so
-    the existing call site can swap in without other changes.
-    """
-    if not rhd_ab1_files:
-        return None, None
-
-    ab1_service = ab1_utils.AB1Analyzer()
-    results = []
-    all_hets = []
-
-    for ab1_file in rhd_ab1_files:
-        try:
-            trace = ab1_service.read_ab1_trace_with_quality(ab1_file)
-            if not trace:
-                continue
-
-            seq = trace['seq']
-            qual = list(trace.get('quality_scores') or [])
-            n = len(seq)
-            if n == 0:
-                continue
-
-            left, right, masked_str, n_masked = quality_trim_and_mask(
-                seq, qual, q_threshold=q_threshold, window=window)
-            if right <= left:
-                continue  # entirely low-quality read
-            trimmed_seq = list(masked_str)
-
-            # 3. Signal-based het detection on the original (untrimmed) trace.
-            #    Normalize first so detect_hetero's thresholds are meaningful.
-            normalized = ab1_service.normalize_trace_per_channel(trace)
-            raw_hets = ab1_service.detect_hetero(normalized, ratio=het_ratio)
-
-            # 4. Encode hets as IUPAC in the trimmed sequence. detect_hetero
-            #    yields (sample_idx, top_bases) where sample_idx is a peak
-            #    position in PLOC2 sample-space. Map back to base index.
-            pos_array = np.asarray(trace['pos'])
-            n_hets_encoded = 0
-            for sample_idx, top_bases in raw_hets:
-                base_idx_arr = np.where(pos_array == sample_idx)[0]
-                if len(base_idx_arr) == 0:
-                    continue
-                base_idx = int(base_idx_arr[0])
-                trimmed_idx = base_idx - left
-                if trimmed_idx < 0 or trimmed_idx >= len(trimmed_seq):
-                    continue
-                if trimmed_seq[trimmed_idx] == 'N':
-                    continue  # quality wins over signal at masked positions
-                major_base = top_bases[0][0]
-                minor_base = top_bases[1][0]
-                iupac = _BASES_TO_IUPAC.get(frozenset([major_base, minor_base]))
-                if not iupac:
-                    continue
-                trimmed_seq[trimmed_idx] = iupac
-                n_hets_encoded += 1
-                all_hets.append({
-                    'position': base_idx,
-                    'ref_base': major_base,
-                    'alt_base': minor_base,
-                    'ratio': top_bases[1][1] / (top_bases[0][1] + 1e-6),
-                    'iupac': iupac,
-                    'filename': getattr(ab1_file, 'name', 'unknown'),
-                })
-
-            trace['seq'] = ''.join(trimmed_seq)
-            trace['filename'] = getattr(ab1_file, 'name', 'unknown')
-            # Per-base Phred quality aligned to the trimmed sequence. Lets
-            # downstream analyzers apply a stricter Q-score gate at each
-            # SNP column without re-doing AB1 parsing.
-            trace['quality_trimmed'] = list(qual[left:right])
-            trace['qc'] = {
-                'q_threshold': q_threshold,
-                'window': window,
-                'trimmed_5p': left,
-                'trimmed_3p': n - right,
-                'masked_internal': n_masked,
-                'het_positions_encoded': n_hets_encoded,
-                'final_length': len(trace['seq']),
-                'original_length': n,
-            }
-            results.append(trace)
-
-        except Exception:
-            continue
-
-    if results:
-        return results, (all_hets if all_hets else None)
-    return None, None
-
-
-def process_rhd_fasta_files(rhd_fasta_files):
-    """
-    Process RHD FASTA files for RHD multi-amplicon analysis.
-
-    Reads each FASTA file, extracts the sequence, and packages it as a
-    dict trace ({'seq': ..., 'filename': ...}) so analyze_rhd_multifactor
-    can process it identically to AB1 traces.
-    """
-    if not rhd_fasta_files:
-        return None
-
-    traces = []
-    for fasta_file in rhd_fasta_files:
-        try:
-            content = fasta_file.read()
-            if isinstance(content, bytes):
-                content = content.decode('utf-8')
-            fasta_text = io.StringIO(content)
-            records = list(SeqIO.parse(fasta_text, "fasta"))
-            if not records:
-                continue
-            seq = str(records[0].seq).upper()
-            if len(seq) < 50:
-                continue
-            traces.append({
-                'seq': seq,
-                'filename': fasta_file.name,
-                'source': 'fasta',
-            })
-        except Exception:
-            continue
-
-    return traces if traces else None
-
-
-def process_fasta_file(fasta_file, exon_start=0, exon_end=0):
-    # Convert Streamlit uploaded file to text mode for BioPython
-
-    # Read the file content and convert to string
-    fasta_content = fasta_file.read()
-    if isinstance(fasta_content, bytes):
-        fasta_content = fasta_content.decode('utf-8')
-
-    # Create a text StringIO object for BioPython
-    fasta_text = io.StringIO(fasta_content)
-
-    # Parse the FASTA file
-    fasta_records = list(SeqIO.parse(fasta_text, "fasta"))
-    if not fasta_records:
-        raise ValueError("No sequences found in FASTA file")
-
-    # Use the first sequence
-    first_record = fasta_records[0]
-    service = fasta_utils.FASTAAlignmentService()
-    fwd_seq = first_record.seq
-    rev_seq = fwd_seq.reverse_complement()
-
-    if exon_end > exon_start > 0:
-        fwd_fasta_analysis = service.analyze_multi_exon_sequence(
-            fwd_seq, list(range(exon_start, exon_end+1)))
-        rev_fasta_analysis = service.analyze_multi_exon_sequence(
-            rev_seq, list(range(exon_start, exon_end+1)))
-    elif exon_start == 0:
-        fwd_fasta_analysis = service.analyze_multi_exon_sequence(
-            fwd_seq, list(range(1, 8)))
-        rev_fasta_analysis = service.analyze_multi_exon_sequence(
-            rev_seq, list(range(1, 8)))
-    else:
-        fwd_fasta_analysis = {}
-        rev_fasta_analysis = {}
-    strand = {"forward": fwd_fasta_analysis,
-              "reverse": rev_fasta_analysis, "none": "none"}
-    fwd_similarities = {}
-    rev_similarities = {}
-    if 'error' in fwd_fasta_analysis or 'error' in rev_fasta_analysis:
-        return {}, []
-    for i in fwd_fasta_analysis['exon_alignments']:
-        fwd_similarities[i['exon_number']] = i['similarity']
-
-    for i in rev_fasta_analysis['exon_alignments']:
-        rev_similarities[i['exon_number']] = i['similarity']
-
-    exon_comparison = {}
-    for exon_num in fwd_similarities.keys():
-        fwd_sim = fwd_similarities.get(exon_num, 0)
-        rev_sim = rev_similarities.get(exon_num, 0)
-        if fwd_sim > rev_sim and fwd_sim > 0.:
-            exon_comparison[exon_num] = {
-                "winner": "forward", "similarity": fwd_sim}
-        elif rev_sim > fwd_sim and rev_sim > 0.9:
-            exon_comparison[exon_num] = {
-                "winner": "reverse", "similarity": rev_sim}
-        else:
-            exon_comparison[exon_num] = {
-                "winner": "tie", "similarity": fwd_sim}
-
-    count_forward_wins = sum(
-        1 for v in exon_comparison.values() if v['winner'] == 'forward')
-    count_reverse_wins = sum(
-        1 for v in exon_comparison.values() if v['winner'] == 'reverse')
-    count_ties = sum(1 for v in exon_comparison.values()
-                     if v['winner'] == 'tie')
-    summary = {
-        "forward_wins": count_forward_wins,
-        "reverse_wins": count_reverse_wins,
-        "ties": count_ties
-    }
-    if summary["forward_wins"] > summary["reverse_wins"]:
-
-        best_match = "forward"
-
-    elif summary["reverse_wins"] > summary["forward_wins"]:
-        best_match = "reverse"
-    else:
-        best_match = "forward"
-
-    selected_strand = strand[best_match]
-    aboRef = service.getABO_ref("exons")
-
-    exons_ref = []
-    exon_combination = []
-    for i in selected_strand['exon_alignments']:
-        if i['similarity'] > 0.9:
-            x = i['exon_number']-1
-            exon = {}
-            exon['exon'] = i['exon_number']
-
-            exon['ref_start'] = i['ref_start']
-            exon['ref_end'] = i['ref_end']
-
-            exon['cds_start'] = aboRef[x]['cds_start']
-            exon['cds_end'] = aboRef[x]['cds_end']
-            exons_ref.append(exon)
-            exon_combination.append(i['exon_number'])
-
-    filtered_exons = [exon for exon in selected_strand['exon_alignments']
-                      if exon['exon_number'] in [e['exon'] for e in exons_ref]]
-    selected_strand['exon_alignments'] = filtered_exons
-    selected_strand['exon_combination'] = exon_combination
-
-    total_variants = 0
-    SNPs = 0
-    insertions = 0
-    deletions = 0
-    for exon in selected_strand['exon_alignments']:
-        total_variants += len(exon['variants'])
-        for var in exon['variants']:
-            if var['type'] == 'SNP':
-                SNPs += 1
-            elif var['type'] == 'insertion':
-                insertions += 1
-            elif var['type'] == 'deletion':
-                deletions += 1
-    selected_strand['total_variants'] = total_variants
-    selected_strand['variant_summary'] = {
-        "SNPs": SNPs,
-        "insertions": insertions,
-        "deletions": deletions
-    }
-
-    return selected_strand, exons_ref
-
-
-def analyze_rhd_multifactor(ab1_traces):
-    """
-    Analyze RHD using RHDAnalyzer with embedded WHO references.
-    Auto-detects amplicon region and applies correct decision logic.
-    """
-    analyzer = RHDAnalyzer()
-    amplicon_results = []
-
-    for i, trace in enumerate(ab1_traces):
-        if not isinstance(trace, dict):
-            continue
-
-        query_seq = trace.get('seq', '')
-        if not query_seq or len(query_seq) < 50:
-            continue
-
-        r = analyzer.analyze(query_seq)
-
-        status_map = {
-            "RhD+":         "RhD+ (D positive)",
-            "RhD-":         "RhD- (D negative)",
-            "RHD Variant":  "RHD Variant - confirm required",
-            "Inconclusive": "Inconclusive - confirm required",
-        }
-        phenotype = status_map.get(r['rhd_status'], r['rhd_status'])
-        region    = r['region']
-        identity  = r['identity'] or 0.0
-        variants  = r['variants']
-
-        result = {
-            'amplicon_index':           i,
-            'query_length':             r['query_length'],
-            'reference_length':         {'RHD1': 951, 'RHD456': 3314, 'RHD7': 934, 'RHD9': 874}.get(region, 0),
-            'matched_region':           region,
-            'reference_description':    f"{region}_ref (WHO standard)",
-            'matched_identity':         round(identity, 1),
-            'identity':                 round(identity, 1),
-            'matched_score':            0.0,
-            'variant_count':            len(variants),
-            'variants':                 variants,
-            'score_1':                  round(identity, 1) if region == "RHD1"   else 0.0,
-            'score_456':                round(identity, 1) if region == "RHD456" else 0.0,
-            'score_7':                  round(identity, 1) if region == "RHD7"   else 0.0,
-            'score_9':                  round(identity, 1) if region == "RHD9"   else 0.0,
-            'phenotype':                phenotype,
-            'reason':                   r['reason'],
-            'rule':                     f"{region} rule (strand: {r['strand']})",
-            'strand':                   r['strand'],
-            'region_assignment_reason': f"{region} auto-detected by alignment",
-        }
-        amplicon_results.append(result)
-
-    return amplicon_results
-
-
-def consolidate_rhd_results(amplicon_results):
-    """
-    Consolidate per-amplicon RHD results into a final verdict.
-    If multiple amplicons: check agreement. If single: use that result.
-    """
-    if not amplicon_results:
-        return None
-    
-    if len(amplicon_results) == 1:
-        return amplicon_results[0]
-    
-    phenotypes = [r.get('phenotype', 'Unknown') for r in amplicon_results]
-    positive_count = sum(1 for p in phenotypes if 'RhD+' in p)
-    negative_count = sum(1 for p in phenotypes if 'RhD-' in p)
-    
-    if positive_count == len(amplicon_results):
-        result = amplicon_results[0].copy()
-        result['phenotype'] = 'RhD+ (confirmed)'
-        result['reason'] = 'All amplicons indicate RHD gene present'
-        result['multi_amplicon'] = True
-    elif negative_count == len(amplicon_results):
-        result = amplicon_results[0].copy()
-        result['phenotype'] = 'RhD- (confirmed)'
-        result['reason'] = 'All amplicons indicate RHD gene absent'
-        result['multi_amplicon'] = True
-    else:
-        result = {
-            'phenotype': 'Inconclusive',
-            'reason': 'Results inconsistent across amplicons',
-            'multi_amplicon': True,
-            'amplicon_count': len(amplicon_results)
-        }
-    
-    return result
-
-
-def get_display_base(base):
-    """Convert IUPAC code to display string."""
-    if base in IUPAC_CODES:
-        base_display = IUPAC_CODES[base]
-        if base == base_display:
-            return base
-        else:
-            return f"{base} ({base_display})"
-    return base
-
-def handle_IUPAC_codes(abo_identifier, i, types):
-    types_list = {
-        'SNP':       'alt_base',
-        'insertion': 'inserted_sequence',
-        'deletion':  'deleted_sequence'
-    }
-    het_variants = []
-    var_nodes    = []
-    unknown      = []
-
-    variant_base   = i.get(types_list[types], "")
-    possible_bases = IUPAC_CODES.get(variant_base, variant_base).split(" or ")
-    ref_base       = i.get('ref_base')
-
-    for base in possible_bases:
-        if not base:
-            continue
-
-        var_node = None
-        if i['type'] == 'deletion':
-            var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], base, "", variant_base)
-        elif i['type'] == 'insertion':
-            var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], "", base, variant_base)
-        else:
-            var_node = abo_identifier.get_variant_node(
-                i['isbt_pos'], ref_base, base, variant_base)
-
-        field = types_list[i['type']]
-        if var_node is not None:
-            var_nodes.append(var_node)
-            het_variants.append(i[field])
-        else:
-            if ref_base is None or base != ref_base:
-                unknown.append(i)
-
-    return var_nodes, het_variants, unknown
-
-
-def identify_abo_alleles(FASTA_variant_list, abo_identifier=None):
-    if abo_identifier is None:
-        abo_identifier = abo_utils.ABOIdentifier("ABO")
-    var_nodes = []
-    het_variants = []
-    unknown = []
-    for exon in FASTA_variant_list['exon_alignments']:
-        variants = exon['variants']
-        for i in variants:
-            if i['type'] == 'insertion':
-                var_node, het_var, unk = handle_IUPAC_codes(
-                    abo_identifier, i, 'insertion')
-            elif i['type'] == 'deletion':
-                var_node, het_var, unk = handle_IUPAC_codes(
-                    abo_identifier, i, 'deletion')
-            else:
-                var_node, het_var, unk = handle_IUPAC_codes(
-                    abo_identifier, i, 'SNP')
-            var_nodes.extend(var_node)
-            het_variants.extend(het_var)
-            unknown.extend(unk)
-    alleles = []
-    node_iupac_map = {node[0]: node[2] for node in var_nodes}
-    print(node_iupac_map)
-    for node_name, node_data, iupac_code in var_nodes:
-        # The identify_alleles method expects a list of tuples (node_name, node_data)
-        # So we pass the current node as a list containing one tuple
-        allele = abo_identifier.identify_alleles([(node_name, node_data)])
-        # Use extend to add elements from the list
-        alleles.append({node_name: allele})
-
-    # Extract the lists of alleles from the 'alleles' list of dictionaries
-    allele_lists = [list(d.values())[0] for d in alleles]
-
-    # Find the intersection of all allele lists
-    if allele_lists:
-        # Start with the first list
-        common_alleles = set(allele_lists[0])
-        # Intersect with the remaining lists
-        for allele_list in allele_lists[1:]:
-            common_alleles.intersection_update(allele_list)
-    else:
-        common_alleles = set()
-    allele_variants_list = []
-    for i in common_alleles:
-        v = abo_identifier.get_variants_for_allele(i)
-        av_list = []
-        for j in v:
-            gene, location, change = j[0].split("_")
-            exon = abo_identifier.get_exon(location)
-            av_list.append({"name": j[0], "exon": exon, "location": int(
-                location), "change": change})  # Convert location to int for sorting
-
-        av_list.sort(key=lambda x: x['location'])
-
-        allele_variants_list.append({i: av_list})
-    allele_variants_list.sort(key=lambda x: list(x.keys())[
-                              0])  # Sort by allele name
-
-    variants_name = [x[0] for x in var_nodes]
-
-    unknown_alleles_to_display = []
-    for u in unknown:
-        item = {}
-        exon = abo_identifier.get_exon(u.get('isbt_pos'))
-        item['isbt_pos'] = u.get('isbt_pos')
-        if exon is None:
-            item['exon'] = 'N/A'
-        item['type'] = u.get('type')
-        if u.get('type') == 'deletion':
-            item['ref_base'] = get_display_base(
-                u.get('deleted_sequence', 'N/A')),
-            item['alt_base'] = '-',
-        elif u.get('type') == 'insertion':
-            item['ref_base'] = '-',
-            item['alt_base'] = get_display_base(
-                u.get('inserted_sequence', 'N/A')),
-
-        else:
-            item['ref_base'] = get_display_base(u.get('ref_base', 'N/A')),
-            item['alt_base'] = get_display_base(u.get('alt_base', 'N/A')),
-
-        unknown_alleles_to_display.append(item)
-    return allele_variants_list, unknown_alleles_to_display, variants_name, node_iupac_map
 
 
 def get_display_iupac_change(change, iupac_code):
@@ -1942,9 +1372,14 @@ if analyze_button:
         di_ab1_files   = list(di_ab1_files   or []) + _routed['DI']['ab1']
         di_fasta_files = list(di_fasta_files or []) + _routed['DI']['fasta']
 
+        # Collect per-file processing failures across every system so corrupt
+        # or unreadable uploads are surfaced to the user instead of silently
+        # dropped (previously each processor swallowed exceptions with `continue`).
+        file_errors = []
+
         # ABO AB1 channel -> chromatogram + heterozygote detection
         processed_AB1, hets = process_ab1_files(
-            fwd_ab1, [], threshold_ratio) if fwd_ab1 else (None, None)
+            fwd_ab1, [], threshold_ratio, errors=file_errors) if fwd_ab1 else (None, None)
 
         # Build synthetic FASTA file objects from AB1 basecalled sequences so
         # they flow through the same variant/allele pipeline as user FASTAs.
@@ -1996,10 +1431,10 @@ if analyze_button:
         # Uses RHD-specific processor with Phred quality trimming and
         # signal-based heterozygous IUPAC encoding for diagnostic SNPs.
         rhd_ab1_traces, _ = process_rhd_ab1_files(
-            rhd_ab1_files, het_ratio=threshold_ratio) if rhd_ab1_files else (None, None)
+            rhd_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if rhd_ab1_files else (None, None)
 
         # RHD FASTA channel -> RHD analyzer
-        rhd_fasta_traces = process_rhd_fasta_files(rhd_fasta_files) if rhd_fasta_files else None
+        rhd_fasta_traces = process_rhd_fasta_files(rhd_fasta_files, errors=file_errors) if rhd_fasta_files else None
 
         # Combine RHD inputs (channel-based, no filename filtering)
         rhd_input_traces = []
@@ -2010,8 +1445,8 @@ if analyze_button:
 
         # RHCE inputs - reuse the RHD AB1/FASTA processors (same trace shape).
         rhce_ab1_traces, _ = process_rhd_ab1_files(
-            rhce_ab1_files, het_ratio=threshold_ratio) if rhce_ab1_files else (None, None)
-        rhce_fasta_traces = process_rhd_fasta_files(rhce_fasta_files) if rhce_fasta_files else None
+            rhce_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if rhce_ab1_files else (None, None)
+        rhce_fasta_traces = process_rhd_fasta_files(rhce_fasta_files, errors=file_errors) if rhce_fasta_files else None
 
         rhce_input_traces = []
         if rhce_ab1_traces:
@@ -2041,8 +1476,8 @@ if analyze_button:
 
         # KEL inputs — reuse the RHD AB1/FASTA processors (same trace shape).
         kel_ab1_traces, _ = process_rhd_ab1_files(
-            kel_ab1_files, het_ratio=threshold_ratio) if kel_ab1_files else (None, None)
-        kel_fasta_traces = process_rhd_fasta_files(kel_fasta_files) if kel_fasta_files else None
+            kel_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if kel_ab1_files else (None, None)
+        kel_fasta_traces = process_rhd_fasta_files(kel_fasta_files, errors=file_errors) if kel_fasta_files else None
 
         kel_input_traces = []
         if kel_ab1_traces:
@@ -2070,8 +1505,8 @@ if analyze_button:
 
         # FY (Duffy) inputs — reuse the RHD AB1/FASTA processors (same trace shape).
         fy_ab1_traces, _ = process_rhd_ab1_files(
-            fy_ab1_files, het_ratio=threshold_ratio) if fy_ab1_files else (None, None)
-        fy_fasta_traces = process_rhd_fasta_files(fy_fasta_files) if fy_fasta_files else None
+            fy_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if fy_ab1_files else (None, None)
+        fy_fasta_traces = process_rhd_fasta_files(fy_fasta_files, errors=file_errors) if fy_fasta_files else None
 
         fy_input_traces = []
         if fy_ab1_traces:
@@ -2098,8 +1533,8 @@ if analyze_button:
 
         # JK (Kidd) inputs — reuse the RHD AB1/FASTA processors (same trace shape).
         jk_ab1_traces, _ = process_rhd_ab1_files(
-            jk_ab1_files, het_ratio=threshold_ratio) if jk_ab1_files else (None, None)
-        jk_fasta_traces = process_rhd_fasta_files(jk_fasta_files) if jk_fasta_files else None
+            jk_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if jk_ab1_files else (None, None)
+        jk_fasta_traces = process_rhd_fasta_files(jk_fasta_files, errors=file_errors) if jk_fasta_files else None
 
         jk_input_traces = []
         if jk_ab1_traces:
@@ -2126,8 +1561,8 @@ if analyze_button:
 
         # H (FUT1 / Bombay) inputs — reuse the RHD AB1/FASTA processors.
         h_ab1_traces, _ = process_rhd_ab1_files(
-            h_ab1_files, het_ratio=threshold_ratio) if h_ab1_files else (None, None)
-        h_fasta_traces = process_rhd_fasta_files(h_fasta_files) if h_fasta_files else None
+            h_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if h_ab1_files else (None, None)
+        h_fasta_traces = process_rhd_fasta_files(h_fasta_files, errors=file_errors) if h_fasta_files else None
 
         h_input_traces = []
         if h_ab1_traces:
@@ -2154,8 +1589,8 @@ if analyze_button:
 
         # MNS (GYPA + GYPB) inputs — reuse the RHD AB1/FASTA processors.
         mns_ab1_traces, _ = process_rhd_ab1_files(
-            mns_ab1_files, het_ratio=threshold_ratio) if mns_ab1_files else (None, None)
-        mns_fasta_traces = process_rhd_fasta_files(mns_fasta_files) if mns_fasta_files else None
+            mns_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if mns_ab1_files else (None, None)
+        mns_fasta_traces = process_rhd_fasta_files(mns_fasta_files, errors=file_errors) if mns_fasta_files else None
 
         mns_input_traces = []
         if mns_ab1_traces:
@@ -2182,8 +1617,8 @@ if analyze_button:
 
         # Diego (SLC4A1) inputs — reuse the RHD AB1/FASTA processors.
         di_ab1_traces, _ = process_rhd_ab1_files(
-            di_ab1_files, het_ratio=threshold_ratio) if di_ab1_files else (None, None)
-        di_fasta_traces = process_rhd_fasta_files(di_fasta_files) if di_fasta_files else None
+            di_ab1_files, het_ratio=threshold_ratio, errors=file_errors) if di_ab1_files else (None, None)
+        di_fasta_traces = process_rhd_fasta_files(di_fasta_files, errors=file_errors) if di_fasta_files else None
 
         di_input_traces = []
         if di_ab1_traces:
@@ -2207,6 +1642,19 @@ if analyze_button:
                     di_result = DIAnalyzer().analyze(di_reads_for_summary)
                 except DIReferenceMissingError as e:
                     di_error_message = str(e)
+
+        # Surface any files that could not be read/parsed across all systems.
+        # Previously these were silently dropped, so a corrupt upload looked
+        # indistinguishable from "no data". Showing them gives the user a chance
+        # to re-export or re-upload before trusting the (incomplete) result.
+        if file_errors:
+            st.warning(
+                f"⚠️ {len(file_errors)} file(s) could not be processed and were "
+                "skipped. Results below exclude these files."
+            )
+            with st.expander("Show files that failed to process", expanded=False):
+                for fe in file_errors:
+                    st.markdown(f"- **{fe['filename']}** — {fe['error']}")
 
         status_container.empty()
 

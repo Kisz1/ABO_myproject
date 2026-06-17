@@ -4,9 +4,17 @@ Aligns each uploaded read against every blood-group system's reference,
 picks the best match by local-alignment identity, and classifies the
 decision so the UI can surface ambiguous reads for human override.
 
-SKETCH ONLY — wiring into main.py (replacing the per-system uploaders with
-one drag-and-drop box, then dispatching routed reads to each analyzer's
-`analyze()` method) is not implemented here.
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STATUS                                                                    │
+│   • route_filename()  — LIVE. The production app dispatches uploads by    │
+│     filename via this function (imported in main.py).                     │
+│   • route_read() / route_reads() + router_ui.py — EXPERIMENTAL, DORMANT.  │
+│     The sequence-content auto-detection path below is fully implemented   │
+│     and unit-tested but is NOT wired into the live app. Wiring it in      │
+│     (one drag-and-drop box dispatching routed reads to each analyzer's    │
+│     analyze() method) is future work. Do not assume it runs in            │
+│     production. See docs/THRESHOLDS.md §F.                                 │
+└─────────────────────────────────────────────────────────────────────────┘
 
 Routing model
 -------------
@@ -38,6 +46,8 @@ from utils.FASTA_analyzer import FASTAAlignmentService
 
 
 # ─── Routing thresholds ──────────────────────────────────────────────────
+# EXPERIMENTAL / DORMANT — these gate route_read()/route_reads() only, which are
+# not wired into the live app (see module banner + docs/THRESHOLDS.md §F).
 MIN_ROUTE_IDENTITY = 90.0   # below this -> "unknown"
 MIN_ROUTE_MARGIN = 5.0      # top minus runner-up below this -> "ambiguous"
 
@@ -215,7 +225,11 @@ def route_read(
     references: dict[str, list[str]],
     aligner: Optional[PairwiseAligner] = None,
 ) -> RoutingDecision:
-    """Classify one read by aligning it against every system's reference."""
+    """Classify one read by aligning it against every system's reference.
+
+    EXPERIMENTAL / DORMANT: not wired into the live app (which routes by
+    filename via route_filename). See the module banner / docs/THRESHOLDS.md §F.
+    """
     aligner = aligner or _build_aligner()
     seq = sequence.upper()
 
@@ -261,6 +275,9 @@ def route_read(
 
 def route_reads(reads: list[tuple[str, str]]) -> list[RoutingDecision]:
     """Route a batch of (read_id, sequence) tuples.
+
+    EXPERIMENTAL / DORMANT: not wired into the live app (which routes by
+    filename via route_filename). See the module banner / docs/THRESHOLDS.md §F.
 
     References are loaded once, the aligner is reused across reads. Returns
     one RoutingDecision per input read, in input order. Caller groups by

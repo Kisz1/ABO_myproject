@@ -1,5 +1,10 @@
 """Streamlit UI for the unified-input routing table.
 
+EXPERIMENTAL / DORMANT: this UI drives the sequence-content router
+(`route_reads`), which is NOT wired into the live app. The production app
+routes uploads by filename (`route_filename`) and does not render this table.
+See `utils/bloodgroup/router.py` banner and docs/THRESHOLDS.md §F.
+
 Renders the routing decisions produced by `utils.bloodgroup.router.route_reads`,
 provides per-row override controls for ambiguous / unknown reads, and returns
 the user-confirmed routing mapping. Kept in a separate module from `router.py`

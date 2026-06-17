@@ -170,7 +170,28 @@ def _cdna_to_genomic_pos(c_pos):
 
 
 # ISBT Standards - Identity thresholds
-IDENTITY_RHD_POSITIVE = 90.0  # % - minimum identity to confirm RHD gene present
+IDENTITY_RHD_POSITIVE = 90.0  # % - minimum identity to confirm RHD gene present.
+                              # Canonical "gene present" floor; the SNP-confirmation
+                              # ladder aliases IDENTITY_RHD_WEAK_D to it. See
+                              # docs/THRESHOLDS.md §C.
+
+# ── SNP-confirmation identity ladder (determine_rhd_phenotype_snp_based) ──────
+# Whole-amplicon alignment-identity floors applied AFTER a diagnostic SNP is
+# detected, to confirm the read is genuinely RHD (not an off-target / RHCE
+# cross-amplification) before emitting a clinical allele call. Ordered by how
+# much intact RHD sequence each call demands:
+#   identity <  IDENTITY_RHD_DELETION  -> complete RHD deletion (no D antigen)
+#   identity >= IDENTITY_RHD_PARTIAL_D -> partial-D SNP calls (DIVa, DVI) + the
+#                                         borderline/fallback floor
+#   identity >= IDENTITY_RHD_WEAK_D    -> weak-D / DEL SNP calls (types 1-4,
+#                                         c.1227 Asian DEL) and the variant
+#                                         fallback
+#   identity >= IDENTITY_RHD_STANDARD_D-> clean Standard D with zero SNPs
+# Provenance + measured stability on the n=9 real RHD panel: docs/THRESHOLDS.md.
+IDENTITY_RHD_DELETION   = 60.0
+IDENTITY_RHD_PARTIAL_D  = 85.0
+IDENTITY_RHD_WEAK_D     = IDENTITY_RHD_POSITIVE  # 90.0 — same "gene present" floor
+IDENTITY_RHD_STANDARD_D = 95.0
 
 # IUPAC ambiguity decoding for heterozygous-aware SNP detection.
 # Each code maps to the set of possible bases it represents.
@@ -508,7 +529,7 @@ class RHDAnalyzer:
             }
 
         # ── PRIORITY 2: Complete RHD gene deletion ───────────────────────
-        if identity < 60.0:
+        if identity < IDENTITY_RHD_DELETION:
             return {
                 'phenotype':   'RhD- (D negative)',
                 'allele':      'RHD*01N.01',
@@ -520,7 +541,7 @@ class RHDAnalyzer:
         # ── PRIORITY 3: Weak D / Partial D / DEL alleles ─────────────────
         if 'c.1227G>A' in detected:
             tag = _zyg_tag('c.1227G>A')
-            if identity >= 90.0:
+            if identity >= IDENTITY_RHD_WEAK_D:
                 return {
                     'phenotype': 'RhD+ (Weak D type 4)',
                     'allele':    'RHD*01W.4',
@@ -539,7 +560,7 @@ class RHDAnalyzer:
                     'zygosity':  diagnostic_snps['c.1227G>A'].get('zygosity'),
                 }
 
-        if 'c.809T>G' in detected and identity >= 90.0:
+        if 'c.809T>G' in detected and identity >= IDENTITY_RHD_WEAK_D:
             tag = _zyg_tag('c.809T>G')
             return {
                 'phenotype': 'RhD+ (Weak D type 1)',
@@ -549,7 +570,7 @@ class RHDAnalyzer:
                 'zygosity':  diagnostic_snps['c.809T>G'].get('zygosity'),
             }
 
-        if 'c.1025T>C' in detected and identity >= 90.0:
+        if 'c.1025T>C' in detected and identity >= IDENTITY_RHD_WEAK_D:
             tag = _zyg_tag('c.1025T>C')
             return {
                 'phenotype': 'RhD+ (Weak D type 2)',
@@ -559,7 +580,7 @@ class RHDAnalyzer:
                 'zygosity':  diagnostic_snps['c.1025T>C'].get('zygosity'),
             }
 
-        if 'c.1154G>C' in detected and identity >= 90.0:
+        if 'c.1154G>C' in detected and identity >= IDENTITY_RHD_WEAK_D:
             tag = _zyg_tag('c.1154G>C')
             return {
                 'phenotype': 'RhD+ (Weak D type 3)',
@@ -569,7 +590,7 @@ class RHDAnalyzer:
                 'zygosity':  diagnostic_snps['c.1154G>C'].get('zygosity'),
             }
 
-        if 'c.602C>G' in detected and identity >= 85.0:
+        if 'c.602C>G' in detected and identity >= IDENTITY_RHD_PARTIAL_D:
             tag = _zyg_tag('c.602C>G')
             return {
                 'phenotype': 'RhD+ (Partial D type IVa)',
@@ -580,7 +601,7 @@ class RHDAnalyzer:
                 'zygosity':  diagnostic_snps['c.602C>G'].get('zygosity'),
             }
 
-        if 'c.667T>G' in detected and identity >= 85.0:
+        if 'c.667T>G' in detected and identity >= IDENTITY_RHD_PARTIAL_D:
             tag = _zyg_tag('c.667T>G')
             return {
                 'phenotype': 'RhD+ (Partial D type VI)',
@@ -592,7 +613,7 @@ class RHDAnalyzer:
             }
 
         # ── PRIORITY 4: Identity-based fallback ──────────────────────────
-        if identity >= 95.0 and len(detected) == 0:
+        if identity >= IDENTITY_RHD_STANDARD_D and len(detected) == 0:
             return {
                 'phenotype': 'RhD+ (Standard D)',
                 'allele':    'RHD*01.01',
@@ -600,7 +621,7 @@ class RHDAnalyzer:
                 'confidence': 'HIGH'
             }
 
-        if identity >= 90.0:
+        if identity >= IDENTITY_RHD_WEAK_D:
             return {
                 'phenotype': 'RhD+ (variant, unknown type)',
                 'allele':    'RHD*variant (UNKNOWN)',
@@ -608,7 +629,7 @@ class RHDAnalyzer:
                 'serology':  'Expert review recommended'
             }
 
-        if 85.0 <= identity < 90.0:
+        if IDENTITY_RHD_PARTIAL_D <= identity < IDENTITY_RHD_WEAK_D:
             return {
                 'phenotype': 'Inconclusive (borderline)',
                 'allele':    'Unknown',
@@ -622,36 +643,6 @@ class RHDAnalyzer:
             'allele':    'RHD deletion probable',
             'reason':    f'Identity {identity:.1f}% (<85%) - RHD gene not detected or severely altered'
         }
-
-    def determine_rhd_phenotype(self, region, query_length, identity, variant_count):
-        """
-        Determine RhD phenotype based on WHO decision rules.
-
-        RHD1 Rules (exon 1 region):
-        - Length < 800 bp & present → RhD+ (gene present)
-        - Length >= 800 bp or missing → RhD- (gene absent/deleted)
-
-        RHD456 Rules (exons 4-6):
-        - Identity >= 90% & variants <= 3 → RhD+ (normal D antigen)
-        - Identity < 90% or variants > 3 → RhD- or RHD Variant
-
-        Returns: (phenotype_status, reason)
-        """
-        if region == 'RHD1':
-            if query_length < RHD1_MAX_LENGTH:
-                return ('RhD+', f'RHD1 amplicon length {query_length} bp (<800 bp indicates RHD gene present)')
-            else:
-                return ('RhD-', f'RHD1 amplicon length {query_length} bp (>=800 bp indicates RHD gene absent/deleted)')
-
-        elif region == 'RHD456':
-            if identity >= IDENTITY_RHD_POSITIVE and variant_count <= VARIANT_COUNT_RHD_POSITIVE:
-                return ('RhD+', f'RHD456 high identity {identity:.1f}% with {variant_count} variants (normal D antigen)')
-            elif identity < IDENTITY_RHD_POSITIVE:
-                return ('RhD-', f'RHD456 low identity {identity:.1f}% (<90% indicates absent/variant D antigen)')
-            else:
-                return ('RHD Variant', f'RHD456 identity {identity:.1f}% with {variant_count} variants (D antigen variant detected)')
-
-        return ('Inconclusive', 'Could not determine amplicon region')
 
     def analyze(self, query_seq, query_quality=None):
         """
@@ -1219,45 +1210,6 @@ class RHDAnalyzer:
             'details': details,
             'total_amplicons': total
         }
-
-    def _determine_vote(self, identity, length, variant_count, region, diagnostic_snps=None):
-        """
-        Determine RhD+/RhD-/Inconclusive vote using ISBT SNP-based analysis.
-
-        ISBT Standard Rules (SNP-based, NOT length-based):
-        - Identity >= 95% AND no diagnostic SNPs → RhD+ (Standard D)
-        - Identity >= 90% AND specific SNPs found → RhD variant (Weak D, Partial D, DEL)
-        - Identity < 85% → RhD- (RHD gene not detected)
-        - 85-90% identity → Inconclusive (need more data)
-        """
-
-        if diagnostic_snps is None:
-            diagnostic_snps = {}
-
-        # Rule 1: Very high identity (95%+), no diagnostic SNPs → Standard RhD+
-        if identity >= 95.0 and len(diagnostic_snps) == 0:
-            return 'RhD+'
-
-        # Rule 2: High identity with diagnostic SNPs → RhD variant (still D+, but specific type)
-        if identity >= IDENTITY_RHD_POSITIVE:
-            if diagnostic_snps:
-                # Has variants - could be Weak D, Partial D, or DEL
-                # All of these are RhD+ phenotypically (have D antigen)
-                return 'RhD+'
-            else:
-                # No diagnostic SNPs but high identity
-                return 'RhD+'
-
-        # Rule 3: Low identity → RhD- (RHD gene absent/not detected)
-        if identity < 85.0:
-            return 'RhD-'
-
-        # Rule 4: Borderline (85-90%) → Inconclusive
-        if 85.0 <= identity < IDENTITY_RHD_POSITIVE:
-            return 'Inconclusive'
-
-        # Default to Inconclusive if unclear
-        return 'Inconclusive'
 
     def _calculate_final_verdict(self, votes, total, raw_votes=None):
         """Calculate final verdict from weighted votes plus raw per-amplicon counts.

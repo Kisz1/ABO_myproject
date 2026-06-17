@@ -90,7 +90,8 @@ ABO analysis works by:
 2. Aligning each to the corresponding ABO reference exon using local gap-aware alignment
 3. Detecting variants (SNPs, insertions, deletions) in the aligned regions
 4. Per-exon scoring: coverage (how much of reference is sequenced) and similarity (% identity)
-5. Confirming exons with >90% similarity as "Confirmed"
+5. Confirming exons with a two-part gate — `ABO_EXON_MIN_COVERAGE` (80%) **and**
+   `ABO_EXON_MIN_SIMILARITY` (70%) in `FASTA_analyzer.py` (see THRESHOLDS.md §E)
 6. Building Cartesian product of all confirmed exons to find consistent allele combinations
 
 ### Variant Handling
@@ -119,11 +120,18 @@ ABO analysis works by:
   - `global_alignment_params` for full-sequence alignment
   - Scoring: match_score (positive), mismatch_score (negative), gap penalties
 
-### Adjusting RHD Decision Thresholds
-- In `rhd_analyzer.py`, update these constants:
-  - `RHD1_MAX_LENGTH`: length threshold for RHD1/RHCE discrimination
-  - `IDENTITY_RHD_POSITIVE`: identity % threshold for RhD+ call
-  - `MAX_VARIANTS_RHD_POSITIVE`: variant count threshold for RhD+ status
+### Adjusting Decision Thresholds
+- **Every numeric decision threshold is cataloged in [`docs/THRESHOLDS.md`](THRESHOLDS.md)**
+  (file location, what it gates, justification, and measured sensitivity). Read
+  it before changing any cutoff, and re-run `python tools/threshold_sensitivity.py`
+  after.
+- RHD identity gates are named constants in `rhd_analyzer.py`:
+  `IDENTITY_RHD_DELETION` (60), `IDENTITY_RHD_PARTIAL_D` (85),
+  `IDENTITY_RHD_WEAK_D`/`IDENTITY_RHD_POSITIVE` (90), `IDENTITY_RHD_STANDARD_D`
+  (95), and the voting floor `MIN_AMPLICON_IDENTITY` (75).
+- NOTE: `determine_rhd_phenotype` (length-based) is dead code referencing
+  undefined `RHD1_MAX_LENGTH` / `VARIANT_COUNT_RHD_POSITIVE`; the live path is
+  the SNP-based voting in `analyze_multiple_amplicons`.
 
 ### Debugging Sequence Alignment
 - Set `DEBUG = True` in `FASTA_analyzer.py` to print alignment details
@@ -146,7 +154,9 @@ ABO analysis works by:
 
 ## Known Issues & Notes
 - AB1 merge logic handles overlapping regions by averaging signal intensity
-- Heterozygote detection threshold (default 0.3 ratio) may need adjustment for weak secondary peaks
+- Heterozygote detection ratio: `HET_RATIO_PIPELINE` (0.30, clinical) in
+  `file_processing.py` overrides the permissive `HET_RATIO_DEFAULT` (0.10) in
+  `ab1_analyzer.py`; see [`docs/THRESHOLDS.md`](THRESHOLDS.md) §Heterozygosity
 - FASTA files must be exon-specific (one exon per file) for accurate per-exon scoring
 - RHD analysis expects ~2kb amplicons (RHD1 or RHD456 regions)
 - Reference sequence files are embedded (no external database required)
