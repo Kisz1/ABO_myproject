@@ -6,6 +6,27 @@ Extracted from main.py for unit-testability.
 import utils.abo_identifier as abo_utils
 
 
+# IUPAC nucleotide ambiguity codes -> the bases they represent. Used to expand
+# heterozygous variant calls into their possible bases. Defined here (rather
+# than in main.py) because this is the only module that consumes it.
+IUPAC_CODES = {
+    'A':	'A',
+    'C':	'C',
+    'G':	'G',
+    'T':	'T',
+    'R':	'A or G',
+    'Y':	'C or T',
+    'S':	'G or C',
+    'W':	'A or T',
+    'K':	'G or T',
+    'M':	'A or C',
+    'B':	'C or G or T',
+    'D':	'A or G or T',
+    'H':	'A or C or T',
+    'V':	'A or C or G',
+    'N':	'A or C or G or T'}
+
+
 def get_display_base(base):
     """Convert IUPAC code to display string."""
     if base in IUPAC_CODES:

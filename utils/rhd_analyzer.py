@@ -346,6 +346,13 @@ MIN_AMPLICON_IDENTITY = 75.0
 # regions count double.
 REGION_VOTE_WEIGHT = {'RHD1': 1, 'RHD456': 2, 'RHD7': 2, 'RHD9': 2}
 
+# Regions that actually discriminate RHD presence vs. deletion. A clear call
+# from any of these overrides RHD1, because RHD1 (exon 1) cross-amplifies the
+# near-identical RHCE exon 1 and can read RhD+ even on a true RhD- (whole-RHD-
+# deletion) sample. Used by the verdict logic so an RHD1 RhD+ artefact cannot
+# tie/override an RHD456/7/9 RhD- call (the "diagnostic region wins" rule).
+DIAGNOSTIC_REGIONS = {'RHD456', 'RHD7', 'RHD9'}
+
 
 class RHDAnalyzer:
     def __init__(self, gb_path=None, reference_seq=None):
@@ -1200,7 +1207,8 @@ class RHDAnalyzer:
 
         # Calculate final verdict
         total = len(amplicon_results)
-        verdict, confidence, details = self._calculate_final_verdict(votes, total, raw_votes)
+        verdict, confidence, details = self._calculate_final_verdict(
+            votes, total, raw_votes, amplicon_results)
 
         return {
             'amplicon_results': amplicon_results,
@@ -1211,7 +1219,8 @@ class RHDAnalyzer:
             'total_amplicons': total
         }
 
-    def _calculate_final_verdict(self, votes, total, raw_votes=None):
+    def _calculate_final_verdict(self, votes, total, raw_votes=None,
+                                 amplicon_results=None):
         """Calculate final verdict from weighted votes plus raw per-amplicon counts.
 
         ``votes`` is the region-weighted tally (RHD456 counts double); the
@@ -1219,7 +1228,9 @@ class RHDAnalyzer:
         dominates exon-1 cross-amplification artefacts. ``raw_votes`` is the
         unit-per-amplicon tally used for the "all amplicons agree" check and
         the human-readable details message. Falls back to ``votes`` if
-        ``raw_votes`` is omitted (legacy callers).
+        ``raw_votes`` is omitted (legacy callers). ``amplicon_results`` (when
+        supplied) carries the per-amplicon region+vote, enabling the
+        diagnostic-region-wins rule below.
         """
 
         rhd_plus = votes.get('RhD+', 0)
@@ -1238,6 +1249,34 @@ class RHDAnalyzer:
             confidence = 'Medium'
         else:
             confidence = 'High'
+
+        # Diagnostic region wins. RHD456/7/9 actually discriminate RHD
+        # presence vs. deletion; RHD1 (exon 1) can read RhD+ via RHCE
+        # cross-amplification even on a true RhD-. So when the diagnostic
+        # regions give a single clear direction, it decides the verdict —
+        # an RHD1 disagreement is reported but cannot create a false
+        # "mixed" tie. Only applied when the diagnostic regions are not
+        # internally contradictory; otherwise we fall through to the
+        # weighted-vote logic below.
+        if amplicon_results:
+            diag = [a for a in amplicon_results
+                    if a.get('region') in DIAGNOSTIC_REGIONS]
+            d_plus = sum(1 for a in diag if a.get('vote') == 'RhD+')
+            d_minus = sum(1 for a in diag if a.get('vote') == 'RhD-')
+
+            if d_minus > 0 and d_plus == 0:
+                note = (' (RHD1 RhD+ disregarded as RHCE cross-amplification)'
+                        if raw_plus else '')
+                return ('RhD- (probable)' if raw_plus else 'RhD- (confirmed)',
+                        confidence,
+                        f'Diagnostic region RHD456/7/9 indicates RhD- '
+                        f'({d_minus}/{len(diag)} diagnostic amplicon(s)){note}')
+            if d_plus > 0 and d_minus == 0:
+                note = (' (RHD1 RhD- disregarded)' if raw_minus else '')
+                return ('RhD+ (probable)' if raw_minus else 'RhD+ (confirmed)',
+                        confidence,
+                        f'Diagnostic region RHD456/7/9 indicates RhD+ '
+                        f'({d_plus}/{len(diag)} diagnostic amplicon(s)){note}')
 
         # All amplicons agree (uses raw per-amplicon counts, not weighted)
         if raw_plus == total and raw_plus > 0:
